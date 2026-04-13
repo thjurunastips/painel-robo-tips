@@ -360,3 +360,71 @@ body {
   margin-bottom: 5px;
   font-weight: bold;
 }
+/* =======================================
+   RESPONSIVIDADE (MOBILE)
+   ======================================= */
+@media (max-width: 768px) {
+  /* Empilha os painéis do Administrador na vertical */
+  .top-section {
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .col-ranking, .col-center, .col-maximas {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  /* Arruma o Logo que estava quebrando */
+  .main-logo {
+    font-size: 22px !important;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* Ajusta os botões das ligas para não vazarem da tela */
+  .league-tabs {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 5px;
+  }
+  
+  .tab-btn {
+    font-size: 12px;
+    padding: 8px 12px;
+  }
+
+  /* O Segredo do Radar: Permite rolar para os lados sem quebrar o site */
+  .grid-matriz-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 15px; /* Espaço para a barra de rolagem */
+    border-radius: 8px;
+  }
+
+  .grid-matriz {
+    /* Força a tabela a ter o tamanho mínimo necessário para não espremer os quadrados */
+    min-width: 900px; 
+  }
+
+  /* Ajusta o cabeçalho do usuário logado */
+  .dashboard-wrapper > div:first-child {
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    text-align: center;
+  }
+  
+  /* Ajusta a barra de buscas de placar e titulo do radar */
+  .matriz-header {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+}
