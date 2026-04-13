@@ -3,128 +3,456 @@ import { supabase } from './supabase';
 import './App.css';
 
 function App() {
+  const [usuarioLogado, setUsuarioLogado] = useState(null);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginSenha, setLoginSenha] = useState('');
+  const [erroLogin, setErroLogin] = useState('');
+  
+  const [novoUserEmail, setNovoUserEmail] = useState('');
+  const [novoUserSenha, setNovoUserSenha] = useState('');
+
   const [estrategias, setEstrategias] = useState([]);
-  const [historico, setHistorico] = useState([]);
+  const [rankingTimes, setRankingTimes] = useState([]);
+  const [estatisticasComp, setEstatisticasComp] = useState([]);
+  const [matrizJogos, setMatrizJogos] = useState([]);
+  const [sinaisAtivos, setSinaisAtivos] = useState([]);
+  
   const [nome, setNome] = useState('');
   const [sequencia, setSequencia] = useState([]);
   const [inputValor, setInputValor] = useState('');
 
-  // Simulação de dados de Ranking e Máximas (Vindo do seu Robô na AWS)
-  const ranking = [
-    { nome: 'Padrão 2.5/0x0', win: '94%' },
-    { nome: 'Mirroring AM', win: '88%' },
-    { nome: 'Over HT 0.5', win: '82%' }
-  ];
+  const [ligaSelecionada, setLigaSelecionada] = useState('Copa');
+  const [placarFiltro, setPlacarFiltro] = useState(null); 
+  const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
+  const [erroDB, setErroDB] = useState('');
 
-  const maximas = [
-    { label: 'AMBAS MARCAM', valor: 14 },
-    { label: 'OVER 2.5 GOLS', valor: 8 },
-    { label: 'PLACAR 0x0', valor: 21 },
-    { label: 'CASA VENCE', valor: 6 }
-  ];
+  const efetuarLogin = async (e) => {
+    e.preventDefault();
+    setErroLogin('');
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('email', loginEmail)
+      .eq('senha', loginSenha)
+      .single();
+    if (error || !data) setErroLogin('Usuário ou senha incorretos!');
+    else setUsuarioLogado(data);
+  };
 
-  useEffect(() => { buscarDados(); }, []);
+  const fazerLogout = () => {
+    setUsuarioLogado(null);
+    setLoginEmail('');
+    setLoginSenha('');
+  };
+
+  const cadastrarCliente = async () => {
+    if (!novoUserEmail || !novoUserSenha) return alert("Preencha email e senha do cliente!");
+    const { error } = await supabase.from('usuarios').insert([{ email: novoUserEmail, senha: novoUserSenha, role: 'user' }]);
+    if (error) alert("❌ Erro ao cadastrar: " + error.message);
+    else {
+      alert("✅ Cliente cadastrado com sucesso!");
+      setNovoUserEmail(''); setNovoUserSenha('');
+    }
+  };
+
+  const sortHoursDescending = (horasArray) => {
+    return horasArray.sort((a, b) => {
+      let diff = b - a;
+      if (diff > 12) return -1;  
+      if (diff < -12) return 1;  
+      return diff;               
+    });
+  };
+
+  useEffect(() => {
+    if (!usuarioLogado) return;
+    buscarDados();
+    const subscription = supabase.channel('dashboard_updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matriz_resultados' }, buscarDados)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'estrategias' }, buscarDados)
+      .subscribe();
+
+    const relogio = setInterval(() => { buscarDados(); }, 30000);
+
+    return () => {
+      supabase.removeChannel(subscription);
+      clearInterval(relogio);
+    };
+  }, [usuarioLogado]);
+
+  useEffect(() => {
+    if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
+  }, [matrizJogos, ligaSelecionada, estrategias]);
 
   async function buscarDados() {
-    const { data: est } = await supabase.from('estrategias').select('*');
-    const { data: hist } = await supabase.from('historico_entradas').select('*').order('created_at', { ascending: false }).limit(60);
-    if (est) setEstrategias(est);
-    if (hist) setHistorico(hist);
+    setErroDB('');
+    const { data: est, error: erroEst } = await supabase.from('estrategias').select('*').order('created_at', { ascending: false });
+    if (erroEst) setErroDB("Erro ao carregar gatilhos: " + erroEst.message);
+    else if (est) setEstrategias(est);
+
+    const { data: matriz, error: erroMat } = await supabase.from('matriz_resultados').select('*').limit(500);
+    if (erroMat) setErroDB("Erro ao carregar matriz: " + erroMat.message);
+    else if (matriz && matriz.length > 0) setMatrizJogos(matriz);
   }
+
+  const deletarEstrategia = async (id) => {
+    const { error } = await supabase.from('estrategias').delete().eq('id', id);
+    if (error) alert("Erro ao excluir: " + error.message);
+    else buscarDados();
+  };
+
+  const normalizar = (texto) => String(texto).trim().toLowerCase();
+
+  const checarPlacar = (placar, condicao) => {
+    if (!placar || placar === "-") return false;
+    const p_limpo = String(placar).replace(/\s/g, ''); // Super filtro de espaços
+    const [c, f] = p_limpo.split("-").map(Number);
+    const total = c + f;
+    const cond = String(condicao).replace(/\s/g, '').toUpperCase();
+
+    if (cond === "+2.5" || cond === "OVER2.5" || cond === "2.5") return total >= 3;
+    if (cond === "-2.5" || cond === "UNDER2.5") return total <= 2;
+    if (cond === "+1.5" || cond === "OVER1.5" || cond === "1.5") return total >= 2;
+    if (cond === "AMBAS" || cond === "BTTS") return c > 0 && f > 0;
+    return p_limpo === cond;
+  };
+
+  const calcularEstatisticasGlobais = (dadosMatriz) => {
+    const timesStats = {};
+    const maximasPorLiga = [];
+    const ligasUnicas = [...new Set(dadosMatriz.map(m => m.liga))];
+
+    const dadosFiltradosParaRanking = dadosMatriz.filter(m => normalizar(m.liga) === normalizar(ligaSelecionada));
+    dadosFiltradosParaRanking.forEach(linha => {
+      if (linha.resultados) {
+        Object.values(linha.resultados).forEach(jogo => {
+          if (jogo.home && jogo.away && jogo.placar !== "-") {
+            if (!timesStats[jogo.home]) timesStats[jogo.home] = { jogos: 0, ambas: 0 };
+            if (!timesStats[jogo.away]) timesStats[jogo.away] = { jogos: 0, ambas: 0 };
+            timesStats[jogo.home].jogos += 1;
+            timesStats[jogo.away].jogos += 1;
+            if (jogo.cor === 'bg-green') {
+              timesStats[jogo.home].ambas += 1;
+              timesStats[jogo.away].ambas += 1;
+            }
+          }
+        });
+      }
+    });
+
+    const rankingArray = Object.keys(timesStats).map(time => {
+      const stats = timesStats[time];
+      return { time, porcentagem: stats.jogos > 0 ? Math.round((stats.ambas / stats.jogos) * 100) : 0 };
+    });
+    rankingArray.sort((a, b) => b.porcentagem - a.porcentagem);
+    setRankingTimes(rankingArray.slice(0, 10));
+
+    let alertasGerados = [];
+    
+    ligasUnicas.forEach(ligaNome => {
+      const linhasDessaLiga = dadosMatriz.filter(m => m.liga === ligaNome);
+      let todosJogosLiga = [];
+      
+      linhasDessaLiga.forEach(linha => {
+        Object.keys(linha.resultados).forEach(min => {
+          const jogo = linha.resultados[min];
+          if (jogo.placar !== "-") {
+            todosJogosLiga.push({ hora: Number(linha.hora), min: Number(min), cor: jogo.cor, placar: jogo.placar });
+          }
+        });
+      });
+
+      const horasDaLiga = sortHoursDescending([...new Set(todosJogosLiga.map(j => j.hora))]);
+
+      let horasFoco = [];
+      for (let i = 0; i < horasDaLiga.length; i++) {
+        let h = horasDaLiga[i];
+        let concluidos = todosJogosLiga.filter(j => j.hora === h && j.placar !== "-");
+        if (concluidos.length > 0) {
+          horasFoco.push(h);
+          if (horasFoco.length === 2) break; 
+        }
+      }
+
+      horasFoco.forEach(horaFoco => {
+        let jogosFoco = todosJogosLiga.filter(j => j.hora === horaFoco && j.placar !== "-").sort((a, b) => a.min - b.min);
+
+        estrategias.forEach(est => {
+          let padraoArray = [];
+          try { padraoArray = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } 
+          catch(e) { return; }
+          
+          if (!padraoArray || padraoArray.length === 0 || !est.ativa) return;
+          const padrao = padraoArray.map(p => p.valor);
+          const tamanho = padrao.length;
+
+          for (let i = 0; i <= jogosFoco.length - tamanho; i++) {
+            let match = true;
+            let minsGatilho = [];
+            
+            for (let j = 0; j < tamanho; j++) {
+              if (!checarPlacar(jogosFoco[i+j].placar, padrao[j])) {
+                match = false; break;
+              }
+              minsGatilho.push(jogosFoco[i+j].min); 
+            }
+            
+            if (match) {
+              let horaAlvo = horaFoco + 1; 
+              if (horaAlvo >= 24) horaAlvo -= 24;
+
+              const jaExiste = alertasGerados.some(a => a.liga === ligaNome && a.horaAlvo === horaAlvo && a.minutosAlvo.join(',') === minsGatilho.join(','));
+              
+              if (!jaExiste) {
+                alertasGerados.push({
+                  liga: ligaNome,
+                  horaAlvo: horaAlvo,        
+                  minutosAlvo: minsGatilho     
+                });
+              }
+            }
+          }
+        });
+      });
+
+      const hourAge = {};
+      horasDaLiga.forEach((h, idx) => hourAge[h] = idx);
+
+      todosJogosLiga.sort((a, b) => {
+        if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[b.hora] - hourAge[a.hora]; 
+        return a.min - b.min; 
+      });
+
+      let maxStreak = 0;
+      let currentStreak = 0;
+      todosJogosLiga.forEach(jogo => {
+        if (jogo.cor === 'bg-red') {
+          currentStreak++;
+          if (currentStreak > maxStreak) maxStreak = currentStreak;
+        } else if (jogo.cor === 'bg-green') {
+          currentStreak = 0;
+        }
+      });
+      maximasPorLiga.push({ liga: ligaNome, jogos_sem_ambas: maxStreak });
+    });
+
+    setSinaisAtivos(alertasGerados);
+    setEstatisticasComp(maximasPorLiga);
+  };
 
   const adicionarBloco = () => {
     if (!inputValor) return;
-    setSequencia([...sequencia, { id: Date.now(), valor: inputValor.toUpperCase() }]);
+    const novosBlocos = inputValor.split(',').map(v => v.trim().toUpperCase()).filter(v => v !== "").map(v => ({ id: Date.now() + Math.random(), valor: v }));
+    setSequencia([...sequencia, ...novosBlocos]);
     setInputValor('');
   };
 
-  return (
-    <div className="dashboard-container">
-      
-      {/* --- COLUNA ESQUERDA: RANKING --- */}
-      <aside className="col-ranking">
-        <h3 className="section-title">🏆 RANKING DIA</h3>
-        <div className="list-container">
-          {ranking.map((item, i) => (
-            <div key={i} className="rank-card">
-              <span className="pos">{i + 1}º</span>
-              <span className="name">{item.nome}</span>
-              <span className="perc">{item.win}</span>
-            </div>
-          ))}
-        </div>
-      </aside>
+  const salvarDados = async () => {
+    if (!nome || sequencia.length === 0) return alert("Preencha o nome e a sequência!");
+    const { error } = await supabase.from('estrategias').insert([{ nome, padrao_visual: sequencia, ativa: true }]);
+    if (error) alert("❌ Erro ao salvar: " + error.message);
+    else { setNome(''); setSequencia([]); buscarDados(); }
+  };
 
-      {/* --- COLUNA CENTRAL: CADASTRO --- */}
-      <main className="col-center">
-        <h2 className="main-logo">TH JURUNAS <span>SYSTEM</span></h2>
+  if (!usuarioLogado) {
+    return (
+      <div className="login-container">
+        <div className="login-box">
+          <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px'}}>TH JURUNAS <span>SYSTEM</span></h2>
+          <form onSubmit={efetuarLogin}>
+            <label>USUÁRIO</label>
+            <input className="flet-input" type="text" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required />
+            <label className="mt-20">SENHA</label>
+            <input className="flet-input" type="password" value={loginSenha} onChange={(e) => setLoginSenha(e.target.value)} required />
+            {erroLogin && <div style={{color: '#ff4444', marginTop: '10px', fontSize: '13px', textAlign: 'center'}}>{erroLogin}</div>}
+            <button className="btn-flet-save" style={{marginTop: '25px', width: '100%'}} type="submit">ENTRAR NO SISTEMA</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  const isAdmin = usuarioLogado.role === 'admin';
+  const linhasDaLiga = matrizJogos.filter(m => normalizar(m.liga) === normalizar(ligaSelecionada));
+  
+  let hrsSet = new Set(linhasDaLiga.map(m => Number(m.hora)));
+  // 🔥 MÁGICA: Normalização bruta aqui para garantir que a horaAlvo vá para o Grid independentemente de espaços no nome da liga
+  sinaisAtivos.filter(s => normalizar(s.liga) === normalizar(ligaSelecionada)).forEach(s => hrsSet.add(s.horaAlvo));
+  
+  const horasDinamicasArray = sortHoursDescending([...hrsSet]);
+  const horasParaMostrar = horasDinamicasArray.length > 0 ? horasDinamicasArray.slice(0, 12) : [];
+  
+  let minutosDinamicos = [];
+  linhasDaLiga.forEach(linha => {
+    if (linha.resultados) {
+      Object.keys(linha.resultados).forEach(min => {
+        const numMin = Number(min);
+        if (!minutosDinamicos.includes(numMin) && !isNaN(numMin)) minutosDinamicos.push(numMin);
+      });
+    }
+  });
+  minutosDinamicos.sort((a, b) => a - b);
+  const minutosCols = minutosDinamicos.length > 0 ? minutosDinamicos : [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58];
+
+  let celulasMaxima = [];
+  let streakAtual = [];
+  
+  const horasDescLocal = sortHoursDescending([...new Set(linhasDaLiga.map(m => Number(m.hora)))]);
+  const hourAgeLocal = {};
+  horasDescLocal.forEach((h, idx) => hourAgeLocal[h] = idx);
+  
+  let todosJogosRadar = [];
+  linhasDaLiga.forEach(linha => {
+    if(linha.resultados) {
+      Object.keys(linha.resultados).forEach(min => {
+        const jogo = linha.resultados[min];
+        if (jogo.placar !== "-") todosJogosRadar.push({ hora: Number(linha.hora), min: Number(min), cor: jogo.cor });
+      });
+    }
+  });
+
+  todosJogosRadar.sort((a, b) => {
+    if (hourAgeLocal[a.hora] !== hourAgeLocal[b.hora]) return hourAgeLocal[b.hora] - hourAgeLocal[a.hora];
+    return a.min - b.min;
+  });
+
+  todosJogosRadar.forEach(jogo => {
+    if (jogo.cor === 'bg-red') {
+      streakAtual.push(`${jogo.hora}-${jogo.min}`);
+      if (streakAtual.length > celulasMaxima.length) celulasMaxima = [...streakAtual];
+    } else if (jogo.cor === 'bg-green') streakAtual = [];
+  });
+  const setMaximas = new Set(celulasMaxima);
+
+  const renderCell = (hora, min) => {
+    const chave = `${hora}-${min}`;
+    // 🔥 MÁGICA: Filtro 100% blindado
+    const isTarget = sinaisAtivos.some(s => normalizar(s.liga) === normalizar(ligaSelecionada) && s.horaAlvo === Number(hora) && s.minutosAlvo.includes(Number(min)));
+
+    if (matrizJogos.length > 0) {
+      const linha = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
+      if (linha && linha.resultados && linha.resultados[String(min)]) {
+        const res = linha.resultados[String(min)];
+        const isMaxima = setMaximas.has(chave);
+        const isSelected = placarFiltro === res.placar;
         
-        <div className="cadastro-card">
-          <label>NOME DA ESTRATÉGIA</label>
-          <input className="flet-input" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Padrão VIP" />
-          
-          <label className="mt-20">MONTAR SEQUÊNCIA DE GATILHO</label>
-          <div className="input-row">
-            <input className="flet-input" value={inputValor} onChange={(e) => setInputValor(e.target.value)} placeholder="0x0, 2.5..." />
-            <button className="btn-flet-add" onClick={adicionarBloco}>ADICIONAR</button>
+        let classesExtras = "";
+        if (isAdmin && isMaxima) classesExtras += " blink-maxima";
+        if (isSelected) classesExtras += " selected-score";
+        if (isAdmin && isTarget) classesExtras += " target-cell";
+
+        return (
+          <div key={chave} className={`grid-cell result-cell ${res.cor} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} style={{ cursor: 'pointer' }}>
+            {res.placar}
+          </div>
+        );
+      }
+      return <div key={chave} className={`grid-cell empty-cell ${isAdmin && isTarget ? 'target-cell' : ''}`}>-</div>;
+    }
+    return <div key={chave} className="grid-cell empty-cell">-</div>;
+  };
+
+  const sinaisDessaLiga = sinaisAtivos.filter(s => normalizar(s.liga) === normalizar(ligaSelecionada));
+
+  return (
+    <div className="dashboard-wrapper">
+      <div style={{display: 'flex', justifyContent: 'space-between', padding: '15px 30px', background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.1)'}}>
+        <div style={{color: '#9FC131', fontWeight: 'bold'}}>👤 Logado como: {usuarioLogado.email} {isAdmin ? '(ADMIN)' : '(CLIENTE)'}</div>
+        <button onClick={fazerLogout} style={{background: 'transparent', color: '#ff4444', border: 'none', cursor: 'pointer', fontWeight: 'bold'}}>SAIR DO SISTEMA</button>
+      </div>
+
+      {erroDB && <div style={{background: '#ff4444', color: '#fff', padding: '10px', textAlign: 'center', fontWeight: 'bold'}}>{erroDB}</div>}
+
+      {isAdmin && (
+        <div className="top-section">
+          <aside className="col-ranking">
+            <h3 className="section-title">📊 TIMES % AM কুল ({ligaSelecionada.toUpperCase()})</h3>
+            <div className="list-container">
+              {rankingTimes.map((item, i) => (
+                <div key={i} className="rank-card"><span className="pos">{i + 1}º</span><span className="name">{item.time}</span><span className="perc">{item.porcentagem}%</span></div>
+              ))}
+            </div>
+          </aside>
+
+          <main className="col-center">
+            <h2 className="main-logo">TH JURUNAS <span>SYSTEM</span></h2>
+            <div className="cadastro-card">
+              <label>NOME DA ESTRATÉGIA</label>
+              <input className="flet-input" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Gatilho Ambas" />
+              <label className="mt-20">SEQUÊNCIA DE GATILHO (+2.5, 0-1, AMBAS)</label>
+              <div className="input-row">
+                <input className="flet-input" value={inputValor} onChange={(e) => setInputValor(e.target.value)} placeholder="Ex: +1.5, 0-0, +1.5" />
+                <button className="btn-flet-add" onClick={adicionarBloco}>+</button>
+              </div>
+              <div className="preview-timeline">{sequencia.map((s) => <div key={s.id} className="mini-flet-box" onClick={() => setSequencia(sequencia.filter(x => x.id !== s.id))}>{s.valor}</div>)}</div>
+              <button className="btn-flet-save" style={{marginTop: '15px'}} onClick={salvarDados}>ATIVAR NOVO GATILHO</button>
+            </div>
+
+            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(159, 193, 49, 0.3)'}}>
+              <h3 className="section-title" style={{marginBottom: '10px', color: '#9FC131'}}>👥 CADASTRAR NOVO CLIENTE</h3>
+              <div className="input-row">
+                <input className="flet-input" value={novoUserEmail} onChange={(e) => setNovoUserEmail(e.target.value)} placeholder="Usuário" />
+                <input className="flet-input" type="password" value={novoUserSenha} onChange={(e) => setNovoUserSenha(e.target.value)} placeholder="Senha" />
+                <button className="btn-flet-save" style={{padding: '0 15px', width: 'auto'}} onClick={cadastrarCliente}>SALVAR</button>
+              </div>
+            </div>
+
+            <div className="active-strategies">
+              <h3 className="section-title" style={{marginTop: '20px'}}>GATILHOS ATIVOS NO SERVIDOR</h3>
+              {estrategias.map(est => {
+                let padraoVisual = [];
+                try { padraoVisual = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } catch(e) { padraoVisual = []; }
+                return (
+                  <div key={est.id} className="mini-est-card" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                    <div><strong>{est.nome}</strong><div className="steps-row">{padraoVisual?.map((p, i) => <span key={i} className="mini-flet-box" style={{padding: '2px 5px', fontSize: '10px'}}>{p.valor}</span>)}</div></div>
+                    <button onClick={() => deletarEstrategia(est.id)} style={{background: 'transparent', border: '1px solid #ff4444', color: '#ff4444', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px'}}>EXCLUIR</button>
+                  </div>
+                );
+              })}
+            </div>
+          </main>
+
+          <aside className="col-maximas">
+            <h3 className="section-title">⚠️ MÁXIMAS SEM AMBAS (24H)</h3>
+            <div className="list-container">
+              {estatisticasComp.map((comp, i) => (
+                <div key={i} className="maxima-item"><span className="m-label">{comp.liga}</span><div className="m-value-box"><span className="m-num">{comp.jogos_sem_ambas}</span><span className="m-text">JOGOS SEGUIDOS</span></div></div>
+              ))}
+            </div>
+          </aside>
+        </div>
+      )}
+
+      <div className="bottom-section" style={!isAdmin ? {marginTop: '50px'} : {}}>
+        {!isAdmin && <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px', fontSize: '28px'}}>TH JURUNAS <span>SYSTEM</span></h2>}
+
+        <div className="league-tabs">
+          {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
+        </div>
+
+        <div className="matriz-container">
+          <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3>
+              📡 RADAR - {ligaSelecionada.toUpperCase()}
+              {isAdmin && sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
+            </h3>
+            {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
           </div>
 
-          <div className="preview-timeline">
-            {sequencia.map((s, i) => (
-              <div key={s.id} className="mini-flet-box">
-                {s.valor}
-                {i < sequencia.length - 1 && <span className="arrow-flet">➜</span>}
-              </div>
-            ))}
+          <div className="grid-matriz-wrapper">
+            <div className="grid-matriz">
+              <div className="grid-cell header-cell">H/M</div>
+              {minutosCols.map(min => <div key={`h-${min}`} className="grid-cell header-cell">{min}</div>)}
+              {horasParaMostrar.map(hora => (
+                <div style={{display: 'contents'}} key={`row-${hora}`}>
+                  <div className="grid-cell hour-cell">{hora}h</div>
+                  {minutosCols.map(min => renderCell(hora, min))}
+                </div>
+              ))}
+            </div>
           </div>
-
-          <button className="btn-flet-save">ATIVAR NO SERVIDOR</button>
         </div>
-
-        {/* ESTRATÉGIAS ATIVAS NO MEIO */}
-        <div className="active-strategies">
-          {estrategias.map(est => (
-            <div key={est.id} className="mini-est-card">
-              <strong>{est.nome}</strong>
-              <div className="steps-row">
-                {est.padrao_visual?.map((p, i) => <span key={i}>{p.valor}</span>)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </main>
-
-      {/* --- COLUNA DIREITA: MÁXIMAS --- */}
-      <aside className="col-maximas">
-        <h3 className="section-title">📊 MÁXIMAS ATUAIS</h3>
-        <div className="list-container">
-          {maximas.map((m, i) => (
-            <div key={i} className="maxima-item">
-              <span className="m-label">{m.label}</span>
-              <div className="m-value-box">
-                <span className="m-num">{m.valor}</span>
-                <span className="m-text">JOGOS SEM</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      {/* --- RODAPÉ: HISTÓRICO DE RESULTADOS --- */}
-      <footer className="row-history">
-        <div className="history-header">
-          <h3>🕒 HISTÓRICO DE RESULTADOS (ÚLTIMOS JOGOS)</h3>
-          <span className="live-indicator">LIVE MONITORING</span>
-        </div>
-        <div className="balls-grid">
-          {historico.map((h, i) => (
-            <div key={i} className={`ball ${h.resultado?.includes('Ambas') ? 'green' : 'red'}`}>
-              {h.resultado?.includes('Ambas') ? 'A' : 'X'}
-            </div>
-          ))}
-        </div>
-      </footer>
-
+      </div>
     </div>
   );
 }
