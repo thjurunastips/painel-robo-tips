@@ -25,6 +25,8 @@ function App() {
   const [placarFiltro, setPlacarFiltro] = useState(null); 
   const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
   const [erroDB, setErroDB] = useState('');
+  
+  const [ultimaAtualizacao, setUltimaAtualizacao] = useState('');
 
   const efetuarLogin = async (e) => {
     e.preventDefault();
@@ -66,18 +68,14 @@ function App() {
 
   useEffect(() => {
     if (!usuarioLogado) return;
-    buscarDados();
-    const subscription = supabase.channel('dashboard_updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matriz_resultados' }, buscarDados)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'estrategias' }, buscarDados)
-      .subscribe();
+    
+    buscarDados(); 
+    
+    const intervalId = setInterval(() => {
+      buscarDados();
+    }, 10000); 
 
-    const relogio = setInterval(() => { buscarDados(); }, 30000);
-
-    return () => {
-      supabase.removeChannel(subscription);
-      clearInterval(relogio);
-    };
+    return () => clearInterval(intervalId);
   }, [usuarioLogado]);
 
   useEffect(() => {
@@ -87,12 +85,15 @@ function App() {
   async function buscarDados() {
     setErroDB('');
     const { data: est, error: erroEst } = await supabase.from('estrategias').select('*').order('created_at', { ascending: false });
-    if (erroEst) setErroDB("Erro ao carregar gatilhos: " + erroEst.message);
-    else if (est) setEstrategias(est);
+    if (est) setEstrategias([...est]);
 
     const { data: matriz, error: erroMat } = await supabase.from('matriz_resultados').select('*').limit(500);
-    if (erroMat) setErroDB("Erro ao carregar matriz: " + erroMat.message);
-    else if (matriz && matriz.length > 0) setMatrizJogos(matriz);
+    if (erroMat) {
+      setErroDB("Erro ao carregar matriz: " + erroMat.message);
+    } else if (matriz) {
+      setMatrizJogos([...matriz]); 
+      setUltimaAtualizacao(new Date().toLocaleTimeString()); 
+    }
   }
 
   const deletarEstrategia = async (id) => {
@@ -105,14 +106,19 @@ function App() {
 
   const checarPlacar = (placar, condicao) => {
     if (!placar || placar === "-") return false;
-    const p_limpo = String(placar).replace(/\s/g, ''); // Super filtro de espaços
+    const p_limpo = String(placar).trim();
     const [c, f] = p_limpo.split("-").map(Number);
     const total = c + f;
     const cond = String(condicao).replace(/\s/g, '').toUpperCase();
 
+    if (cond === "+3.5" || cond === "OVER3.5" || cond === "3.5") return total >= 4;
+    if (cond === "-3.5" || cond === "UNDER3.5") return total <= 3;
     if (cond === "+2.5" || cond === "OVER2.5" || cond === "2.5") return total >= 3;
     if (cond === "-2.5" || cond === "UNDER2.5") return total <= 2;
     if (cond === "+1.5" || cond === "OVER1.5" || cond === "1.5") return total >= 2;
+    if (cond === "-1.5" || cond === "UNDER1.5") return total <= 1;
+    if (cond === "+0.5" || cond === "OVER0.5" || cond === "0.5") return total >= 1;
+    if (cond === "-0.5" || cond === "UNDER0.5") return total === 0;
     if (cond === "AMBAS" || cond === "BTTS") return c > 0 && f > 0;
     return p_limpo === cond;
   };
@@ -164,18 +170,8 @@ function App() {
 
       const horasDaLiga = sortHoursDescending([...new Set(todosJogosLiga.map(j => j.hora))]);
 
-      let horasFoco = [];
-      for (let i = 0; i < horasDaLiga.length; i++) {
-        let h = horasDaLiga[i];
-        let concluidos = todosJogosLiga.filter(j => j.hora === h && j.placar !== "-");
-        if (concluidos.length > 0) {
-          horasFoco.push(h);
-          if (horasFoco.length === 2) break; 
-        }
-      }
-
-      horasFoco.forEach(horaFoco => {
-        let jogosFoco = todosJogosLiga.filter(j => j.hora === horaFoco && j.placar !== "-").sort((a, b) => a.min - b.min);
+      horasDaLiga.forEach(horaAtual => {
+        const jogosDessaHora = todosJogosLiga.filter(j => j.hora === horaAtual).sort((a, b) => a.min - b.min);
 
         estrategias.forEach(est => {
           let padraoArray = [];
@@ -186,30 +182,26 @@ function App() {
           const padrao = padraoArray.map(p => p.valor);
           const tamanho = padrao.length;
 
-          for (let i = 0; i <= jogosFoco.length - tamanho; i++) {
+          for (let i = 0; i <= jogosDessaHora.length - tamanho; i++) {
             let match = true;
             let minsGatilho = [];
             
             for (let j = 0; j < tamanho; j++) {
-              if (!checarPlacar(jogosFoco[i+j].placar, padrao[j])) {
+              if (!checarPlacar(jogosDessaHora[i+j].placar, padrao[j])) {
                 match = false; break;
               }
-              minsGatilho.push(jogosFoco[i+j].min); 
+              minsGatilho.push(jogosDessaHora[i+j].min); 
             }
             
             if (match) {
-              let horaAlvo = horaFoco + 1; 
+              let horaAlvo = horaAtual + 1;
               if (horaAlvo >= 24) horaAlvo -= 24;
 
-              const jaExiste = alertasGerados.some(a => a.liga === ligaNome && a.horaAlvo === horaAlvo && a.minutosAlvo.join(',') === minsGatilho.join(','));
-              
-              if (!jaExiste) {
-                alertasGerados.push({
-                  liga: ligaNome,
-                  horaAlvo: horaAlvo,        
-                  minutosAlvo: minsGatilho     
-                });
-              }
+              alertasGerados.push({
+                liga: ligaNome,
+                horaAlvo: horaAlvo,        
+                minutosAlvo: minsGatilho     
+              });
             }
           }
         });
@@ -276,8 +268,7 @@ function App() {
   const linhasDaLiga = matrizJogos.filter(m => normalizar(m.liga) === normalizar(ligaSelecionada));
   
   let hrsSet = new Set(linhasDaLiga.map(m => Number(m.hora)));
-  // 🔥 MÁGICA: Normalização bruta aqui para garantir que a horaAlvo vá para o Grid independentemente de espaços no nome da liga
-  sinaisAtivos.filter(s => normalizar(s.liga) === normalizar(ligaSelecionada)).forEach(s => hrsSet.add(s.horaAlvo));
+  sinaisAtivos.filter(s => s.liga === ligaSelecionada).forEach(s => hrsSet.add(s.horaAlvo));
   
   const horasDinamicasArray = sortHoursDescending([...hrsSet]);
   const horasParaMostrar = horasDinamicasArray.length > 0 ? horasDinamicasArray.slice(0, 12) : [];
@@ -326,8 +317,7 @@ function App() {
 
   const renderCell = (hora, min) => {
     const chave = `${hora}-${min}`;
-    // 🔥 MÁGICA: Filtro 100% blindado
-    const isTarget = sinaisAtivos.some(s => normalizar(s.liga) === normalizar(ligaSelecionada) && s.horaAlvo === Number(hora) && s.minutosAlvo.includes(Number(min)));
+    const isTarget = sinaisAtivos.some(s => s.liga === ligaSelecionada && s.horaAlvo === Number(hora) && s.minutosAlvo.includes(Number(min)));
 
     if (matrizJogos.length > 0) {
       const linha = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
@@ -340,10 +330,35 @@ function App() {
         if (isAdmin && isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
         if (isAdmin && isTarget) classesExtras += " target-cell";
+        
+        // 🔥 LÓGICA DAS ODDS AQUI:
+        const isFuturo = res.placar === "-";
+        const oddVeioVazia = res.odd_sim === "None" || !res.odd_sim || res.odd_sim === "-";
 
         return (
-          <div key={chave} className={`grid-cell result-cell ${res.cor} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} style={{ cursor: 'pointer' }}>
-            {res.placar}
+          <div 
+            key={chave} 
+            className={`grid-cell result-cell ${res.cor} ${classesExtras}`} 
+            title={`${res.home || '?'} x ${res.away || '?'}`} 
+            onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} 
+            style={{ 
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              lineHeight: '1.2'
+            }}
+          >
+            {isFuturo ? (
+               oddVeioVazia ? (
+                 <div style={{ color: '#888', fontSize: '8px' }}> - </div>
+               ) : (
+                 <div style={{ color: '#ffcc00', fontSize: '10px', fontWeight: 'bold' }}>{res.odd_sim}</div>
+               )
+            ) : (
+               res.placar
+            )}
           </div>
         );
       }
@@ -352,13 +367,14 @@ function App() {
     return <div key={chave} className="grid-cell empty-cell">-</div>;
   };
 
-  const sinaisDessaLiga = sinaisAtivos.filter(s => normalizar(s.liga) === normalizar(ligaSelecionada));
+  const sinaisDessaLiga = sinaisAtivos.filter(s => s.liga === ligaSelecionada);
 
   return (
     <div className="dashboard-wrapper">
-      <div style={{display: 'flex', justifyContent: 'space-between', padding: '15px 30px', background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.1)'}}>
-        <div style={{color: '#9FC131', fontWeight: 'bold'}}>👤 Logado como: {usuarioLogado.email} {isAdmin ? '(ADMIN)' : '(CLIENTE)'}</div>
-        <button onClick={fazerLogout} style={{background: 'transparent', color: '#ff4444', border: 'none', cursor: 'pointer', fontWeight: 'bold'}}>SAIR DO SISTEMA</button>
+      {/* 🔥 TOPO ARRUMADO PARA CELULAR */}
+      <div className="top-bar-user">
+        <div className="user-info">👤 Logado como: {usuarioLogado.email} {isAdmin ? '(ADMIN)' : '(CLIENTE)'}</div>
+        <button className="btn-logout" onClick={fazerLogout}>SAIR DO SISTEMA</button>
       </div>
 
       {erroDB && <div style={{background: '#ff4444', color: '#fff', padding: '10px', textAlign: 'center', fontWeight: 'bold'}}>{erroDB}</div>}
@@ -366,7 +382,7 @@ function App() {
       {isAdmin && (
         <div className="top-section">
           <aside className="col-ranking">
-            <h3 className="section-title">📊 TIMES % AM কুল ({ligaSelecionada.toUpperCase()})</h3>
+            <h3 className="section-title">📊 TIMES % AMBAS ({ligaSelecionada.toUpperCase()})</h3>
             <div className="list-container">
               {rankingTimes.map((item, i) => (
                 <div key={i} className="rank-card"><span className="pos">{i + 1}º</span><span className="name">{item.time}</span><span className="perc">{item.porcentagem}%</span></div>
@@ -436,7 +452,11 @@ function App() {
               📡 RADAR - {ligaSelecionada.toUpperCase()}
               {isAdmin && sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
             </h3>
-            {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
+            <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+              {ultimaAtualizacao && <span style={{fontSize: '11px', color: '#888'}}>Atualizado às {ultimaAtualizacao}</span>}
+              
+              {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
+            </div>
           </div>
 
           <div className="grid-matriz-wrapper">
