@@ -23,14 +23,12 @@ function App() {
 
   const [ligaSelecionada, setLigaSelecionada] = useState('Copa');
   const [placarFiltro, setPlacarFiltro] = useState(null); 
-  // 🔥 NOVO ESTADO: O Filtro de Mercado do Cliente
   const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
 
   const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
   const [erroDB, setErroDB] = useState('');
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('');
 
-  // 🔥 LISTA DE MERCADOS PARA O FILTRO
   const mercadosDrop = [
     { id: 'AMBAS', label: 'Ambas Marcam (Sim)' },
     { id: 'AMBAS_NAO', label: 'Ambas Não Marcam' },
@@ -85,7 +83,6 @@ function App() {
     return () => clearInterval(intervalId);
   }, [usuarioLogado]);
 
-  // 🔥 Adicionamos o mercadoAtivo como dependência para recalcular tudo quando o cliente muda o select
   useEffect(() => {
     if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
   }, [matrizJogos, ligaSelecionada, estrategias, mercadoAtivo]);
@@ -131,7 +128,6 @@ function App() {
     return p_limpo === cond;
   };
 
-  // 🔥 MOTOR DE CORES DINÂMICO BASEADO NO FILTRO SELECIONADO
   const calcularCorDinamica = (placar, mercado) => {
     if (!placar || placar === "-") return "empty-cell";
     const [c, f] = String(placar).split("-").map(Number);
@@ -167,7 +163,6 @@ function App() {
             timesStats[jogo.home].jogos += 1;
             timesStats[jogo.away].jogos += 1;
             
-            // 🔥 Ranking baseado na cor dinâmica do mercado ativo!
             const corDinamica = calcularCorDinamica(jogo.placar, mercadoAtivo);
             if (corDinamica === 'bg-green') {
               timesStats[jogo.home].hits += 1;
@@ -200,7 +195,7 @@ function App() {
               hora: Number(linha.hora), 
               min: Number(min), 
               placar: jogo.placar,
-              corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) // Passa a cor baseada no filtro
+              corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) 
             });
           }
         });
@@ -256,7 +251,6 @@ function App() {
       let maxStreak = 0;
       let currentStreak = 0;
       todosJogosLiga.forEach(jogo => {
-        // 🔥 Máximas (Streaks) baseadas no mercado ativo!
         if (jogo.corDinamica === 'bg-red') {
           currentStreak++;
           if (currentStreak > maxStreak) maxStreak = currentStreak;
@@ -340,7 +334,7 @@ function App() {
           todosJogosRadar.push({ 
             hora: Number(linha.hora), 
             min: Number(min), 
-            corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) // Usa o filtro ativo
+            corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo)
           });
         }
       });
@@ -361,7 +355,7 @@ function App() {
   const setMaximas = new Set(celulasMaxima);
 
   // ========================================================
-  // 🔥 LÓGICA DE ESTATÍSTICAS TOP (POR MINUTO) BASEADA NO FILTRO
+  // 🔥 LÓGICA DE ESTATÍSTICAS TOP (POR MINUTO) 
   // ========================================================
   const statsPorMinuto = {};
   minutosCols.forEach(min => {
@@ -444,7 +438,6 @@ function App() {
       {isAdmin && (
         <div className="top-section">
           <aside className="col-ranking">
-            {/* Título do Ranking dinâmico baseado no filtro */}
             <h3 className="section-title">📊 TIMES % {nomeMercadoAtual}</h3>
             <div className="list-container">
               {rankingTimes.map((item, i) => (
@@ -493,7 +486,6 @@ function App() {
           </main>
 
           <aside className="col-maximas">
-            {/* Título de Máximas dinâmico baseado no filtro */}
             <h3 className="section-title">⚠️ MÁXIMAS S/ {nomeMercadoAtual}</h3>
             <div className="list-container">
               {estatisticasComp.map((comp, i) => (
@@ -507,7 +499,6 @@ function App() {
       <div className="bottom-section" style={!isAdmin ? {marginTop: '50px'} : {}}>
         {!isAdmin && <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px', fontSize: '28px'}}>TH JURUNAS <span>SYSTEM</span></h2>}
 
-        {/* 🔥 FILTROS DA LIGA E DO MERCADO */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div className="league-tabs" style={{ marginBottom: 0 }}>
             {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
@@ -545,12 +536,16 @@ function App() {
               {/* ESTATÍSTICAS DO TOPO */}
               <div style={{display: 'contents'}}>
                 <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
-                {minutosCols.map(min => (
-                  <div key={`stat-${min}`} className="grid-cell top-stat-cell">
-                    <span style={{color: '#ffcc00', fontWeight: 'bold', fontSize: '11px', lineHeight: '1'}}>{statsPorMinuto[min].greens}</span>
-                    <span style={{color: '#9FC131', fontSize: '9px', lineHeight: '1', marginTop: '2px'}}>{statsPorMinuto[min].perc}%</span>
-                  </div>
-                ))}
+                {minutosCols.map(min => {
+                  const s = statsPorMinuto[min];
+                  const corPerc = s.perc >= 50 ? '#9FC131' : '#ff4444'; // 🔥 Verde se >= 50%, Vermelho se < 50%
+                  return (
+                    <div key={`stat-${min}`} className="grid-cell top-stat-cell">
+                      <span style={{color: '#ffcc00', fontWeight: 'bold', fontSize: '11px', lineHeight: '1'}}>{s.greens}</span>
+                      <span style={{color: corPerc, fontSize: '9px', lineHeight: '1', marginTop: '2px'}}>{s.perc}%</span>
+                    </div>
+                  );
+                })}
                 <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
                 <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
               </div>
@@ -586,13 +581,14 @@ function App() {
                   });
                 }
                 const percRow = totalValidosRow > 0 ? Math.round((totalGreensRow / totalValidosRow) * 100) : 0;
+                const corPercRow = percRow >= 50 ? '#9FC131' : '#ff4444'; // 🔥 Verde se >= 50%, Vermelho se < 50%
 
                 return (
                   <div style={{display: 'contents'}} key={`row-${hora}`}>
                     <div className="grid-cell hour-cell">{hora}h</div>
                     {minutosCols.map(min => renderCell(hora, min))}
                     
-                    <div className="grid-cell side-stat-cell">
+                    <div className="grid-cell side-stat-cell" style={{ color: corPercRow }}>
                       ({percRow}%)
                     </div>
                     <div className="grid-cell side-stat-cell" style={{color: '#fff'}}>
