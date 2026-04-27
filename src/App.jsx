@@ -23,10 +23,22 @@ function App() {
 
   const [ligaSelecionada, setLigaSelecionada] = useState('Copa');
   const [placarFiltro, setPlacarFiltro] = useState(null); 
+  // 🔥 NOVO ESTADO: O Filtro de Mercado do Cliente
+  const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
+
   const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
   const [erroDB, setErroDB] = useState('');
-  
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('');
+
+  // 🔥 LISTA DE MERCADOS PARA O FILTRO
+  const mercadosDrop = [
+    { id: 'AMBAS', label: 'Ambas Marcam (Sim)' },
+    { id: 'AMBAS_NAO', label: 'Ambas Não Marcam' },
+    { id: 'OVER_15', label: '+1.5 Gols' },
+    { id: 'OVER_25', label: '+2.5 Gols' },
+    { id: 'OVER_45', label: '+5 Gols na Partida (FT)' },
+    { id: 'GOLEADA', label: '+5 Gols de um Time' },
+  ];
 
   const efetuarLogin = async (e) => {
     e.preventDefault();
@@ -68,19 +80,15 @@ function App() {
 
   useEffect(() => {
     if (!usuarioLogado) return;
-    
     buscarDados(); 
-    
-    const intervalId = setInterval(() => {
-      buscarDados();
-    }, 10000); 
-
+    const intervalId = setInterval(() => { buscarDados(); }, 10000); 
     return () => clearInterval(intervalId);
   }, [usuarioLogado]);
 
+  // 🔥 Adicionamos o mercadoAtivo como dependência para recalcular tudo quando o cliente muda o select
   useEffect(() => {
     if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
-  }, [matrizJogos, ligaSelecionada, estrategias]);
+  }, [matrizJogos, ligaSelecionada, estrategias, mercadoAtivo]);
 
   async function buscarDados() {
     setErroDB('');
@@ -123,6 +131,27 @@ function App() {
     return p_limpo === cond;
   };
 
+  // 🔥 MOTOR DE CORES DINÂMICO BASEADO NO FILTRO SELECIONADO
+  const calcularCorDinamica = (placar, mercado) => {
+    if (!placar || placar === "-") return "empty-cell";
+    const [c, f] = String(placar).split("-").map(Number);
+    if (isNaN(c) || isNaN(f)) return "empty-cell";
+    
+    const total = c + f;
+    let isGreen = false;
+
+    switch (mercado) {
+      case 'AMBAS': isGreen = (c > 0 && f > 0); break;
+      case 'AMBAS_NAO': isGreen = (c === 0 || f === 0); break;
+      case 'OVER_15': isGreen = (total >= 2); break;
+      case 'OVER_25': isGreen = (total >= 3); break;
+      case 'OVER_45': isGreen = (total >= 5); break;
+      case 'GOLEADA': isGreen = (c >= 5 || f >= 5); break;
+      default: isGreen = (c > 0 && f > 0);
+    }
+    return isGreen ? 'bg-green' : 'bg-red';
+  };
+
   const calcularEstatisticasGlobais = (dadosMatriz) => {
     const timesStats = {};
     const maximasPorLiga = [];
@@ -133,13 +162,16 @@ function App() {
       if (linha.resultados) {
         Object.values(linha.resultados).forEach(jogo => {
           if (jogo.home && jogo.away && jogo.placar !== "-") {
-            if (!timesStats[jogo.home]) timesStats[jogo.home] = { jogos: 0, ambas: 0 };
-            if (!timesStats[jogo.away]) timesStats[jogo.away] = { jogos: 0, ambas: 0 };
+            if (!timesStats[jogo.home]) timesStats[jogo.home] = { jogos: 0, hits: 0 };
+            if (!timesStats[jogo.away]) timesStats[jogo.away] = { jogos: 0, hits: 0 };
             timesStats[jogo.home].jogos += 1;
             timesStats[jogo.away].jogos += 1;
-            if (jogo.cor === 'bg-green') {
-              timesStats[jogo.home].ambas += 1;
-              timesStats[jogo.away].ambas += 1;
+            
+            // 🔥 Ranking baseado na cor dinâmica do mercado ativo!
+            const corDinamica = calcularCorDinamica(jogo.placar, mercadoAtivo);
+            if (corDinamica === 'bg-green') {
+              timesStats[jogo.home].hits += 1;
+              timesStats[jogo.away].hits += 1;
             }
           }
         });
@@ -148,7 +180,7 @@ function App() {
 
     const rankingArray = Object.keys(timesStats).map(time => {
       const stats = timesStats[time];
-      return { time, porcentagem: stats.jogos > 0 ? Math.round((stats.ambas / stats.jogos) * 100) : 0 };
+      return { time, porcentagem: stats.jogos > 0 ? Math.round((stats.hits / stats.jogos) * 100) : 0 };
     });
     rankingArray.sort((a, b) => b.porcentagem - a.porcentagem);
     setRankingTimes(rankingArray.slice(0, 10));
@@ -160,10 +192,16 @@ function App() {
       let todosJogosLiga = [];
       
       linhasDessaLiga.forEach(linha => {
+        if (!linha.resultados) return;
         Object.keys(linha.resultados).forEach(min => {
           const jogo = linha.resultados[min];
           if (jogo.placar !== "-") {
-            todosJogosLiga.push({ hora: Number(linha.hora), min: Number(min), cor: jogo.cor, placar: jogo.placar });
+            todosJogosLiga.push({ 
+              hora: Number(linha.hora), 
+              min: Number(min), 
+              placar: jogo.placar,
+              corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) // Passa a cor baseada no filtro
+            });
           }
         });
       });
@@ -218,10 +256,11 @@ function App() {
       let maxStreak = 0;
       let currentStreak = 0;
       todosJogosLiga.forEach(jogo => {
-        if (jogo.cor === 'bg-red') {
+        // 🔥 Máximas (Streaks) baseadas no mercado ativo!
+        if (jogo.corDinamica === 'bg-red') {
           currentStreak++;
           if (currentStreak > maxStreak) maxStreak = currentStreak;
-        } else if (jogo.cor === 'bg-green') {
+        } else if (jogo.corDinamica === 'bg-green') {
           currentStreak = 0;
         }
       });
@@ -297,7 +336,13 @@ function App() {
     if(linha.resultados) {
       Object.keys(linha.resultados).forEach(min => {
         const jogo = linha.resultados[min];
-        if (jogo.placar !== "-") todosJogosRadar.push({ hora: Number(linha.hora), min: Number(min), cor: jogo.cor });
+        if (jogo.placar !== "-") {
+          todosJogosRadar.push({ 
+            hora: Number(linha.hora), 
+            min: Number(min), 
+            corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) // Usa o filtro ativo
+          });
+        }
       });
     }
   });
@@ -308,12 +353,32 @@ function App() {
   });
 
   todosJogosRadar.forEach(jogo => {
-    if (jogo.cor === 'bg-red') {
+    if (jogo.corDinamica === 'bg-red') {
       streakAtual.push(`${jogo.hora}-${jogo.min}`);
       if (streakAtual.length > celulasMaxima.length) celulasMaxima = [...streakAtual];
-    } else if (jogo.cor === 'bg-green') streakAtual = [];
+    } else if (jogo.corDinamica === 'bg-green') streakAtual = [];
   });
   const setMaximas = new Set(celulasMaxima);
+
+  // ========================================================
+  // 🔥 LÓGICA DE ESTATÍSTICAS TOP (POR MINUTO) BASEADA NO FILTRO
+  // ========================================================
+  const statsPorMinuto = {};
+  minutosCols.forEach(min => {
+    let totalValidos = 0;
+    let totalGreens = 0;
+    linhasDaLiga.forEach(linha => {
+      if (linha.resultados && linha.resultados[String(min)]) {
+        const jogo = linha.resultados[String(min)];
+        if (jogo.placar !== "-") {
+          totalValidos++;
+          if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreens++;
+        }
+      }
+    });
+    const perc = totalValidos > 0 ? Math.round((totalGreens / totalValidos) * 100) : 0;
+    statsPorMinuto[min] = { greens: totalGreens, perc };
+  });
 
   const renderCell = (hora, min) => {
     const chave = `${hora}-${min}`;
@@ -326,28 +391,25 @@ function App() {
         const isMaxima = setMaximas.has(chave);
         const isSelected = placarFiltro === res.placar;
         
+        const corDefinitiva = calcularCorDinamica(res.placar, mercadoAtivo);
+
         let classesExtras = "";
         if (isAdmin && isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
         if (isAdmin && isTarget) classesExtras += " target-cell";
         
-        // 🔥 LÓGICA DAS ODDS AQUI:
         const isFuturo = res.placar === "-";
         const oddVeioVazia = res.odd_sim === "None" || !res.odd_sim || res.odd_sim === "-";
 
         return (
           <div 
             key={chave} 
-            className={`grid-cell result-cell ${res.cor} ${classesExtras}`} 
+            className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} 
             title={`${res.home || '?'} x ${res.away || '?'}`} 
             onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} 
             style={{ 
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              lineHeight: '1.2'
+              cursor: 'pointer', display: 'flex', flexDirection: 'column',
+              justifyContent: 'center', alignItems: 'center', lineHeight: '1.2'
             }}
           >
             {isFuturo ? (
@@ -368,10 +430,10 @@ function App() {
   };
 
   const sinaisDessaLiga = sinaisAtivos.filter(s => s.liga === ligaSelecionada);
+  const nomeMercadoAtual = mercadosDrop.find(m => m.id === mercadoAtivo)?.label.toUpperCase();
 
   return (
     <div className="dashboard-wrapper">
-      {/* 🔥 TOPO ARRUMADO PARA CELULAR */}
       <div className="top-bar-user">
         <div className="user-info">👤 Logado como: {usuarioLogado.email} {isAdmin ? '(ADMIN)' : '(CLIENTE)'}</div>
         <button className="btn-logout" onClick={fazerLogout}>SAIR DO SISTEMA</button>
@@ -382,7 +444,8 @@ function App() {
       {isAdmin && (
         <div className="top-section">
           <aside className="col-ranking">
-            <h3 className="section-title">📊 TIMES % AMBAS ({ligaSelecionada.toUpperCase()})</h3>
+            {/* Título do Ranking dinâmico baseado no filtro */}
+            <h3 className="section-title">📊 TIMES % {nomeMercadoAtual}</h3>
             <div className="list-container">
               {rankingTimes.map((item, i) => (
                 <div key={i} className="rank-card"><span className="pos">{i + 1}º</span><span className="name">{item.time}</span><span className="perc">{item.porcentagem}%</span></div>
@@ -392,6 +455,7 @@ function App() {
 
           <main className="col-center">
             <h2 className="main-logo">TH JURUNAS <span>SYSTEM</span></h2>
+            
             <div className="cadastro-card">
               <label>NOME DA ESTRATÉGIA</label>
               <input className="flet-input" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Gatilho Ambas" />
@@ -404,7 +468,7 @@ function App() {
               <button className="btn-flet-save" style={{marginTop: '15px'}} onClick={salvarDados}>ATIVAR NOVO GATILHO</button>
             </div>
 
-            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(159, 193, 49, 0.3)'}}>
+            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#9FC131'}}>👥 CADASTRAR NOVO CLIENTE</h3>
               <div className="input-row">
                 <input className="flet-input" value={novoUserEmail} onChange={(e) => setNovoUserEmail(e.target.value)} placeholder="Usuário" />
@@ -420,7 +484,7 @@ function App() {
                 try { padraoVisual = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } catch(e) { padraoVisual = []; }
                 return (
                   <div key={est.id} className="mini-est-card" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <div><strong>{est.nome}</strong><div className="steps-row">{padraoVisual?.map((p, i) => <span key={i} className="mini-flet-box" style={{padding: '2px 5px', fontSize: '10px'}}>{p.valor}</span>)}</div></div>
+                    <div><strong>{est.nome}</strong><div className="steps-row" style={{display: 'flex', gap: '4px', marginTop: '5px'}}>{padraoVisual?.map((p, i) => <span key={i} className="mini-flet-box" style={{padding: '2px 5px', fontSize: '10px'}}>{p.valor}</span>)}</div></div>
                     <button onClick={() => deletarEstrategia(est.id)} style={{background: 'transparent', border: '1px solid #ff4444', color: '#ff4444', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px'}}>EXCLUIR</button>
                   </div>
                 );
@@ -429,7 +493,8 @@ function App() {
           </main>
 
           <aside className="col-maximas">
-            <h3 className="section-title">⚠️ MÁXIMAS SEM AMBAS (24H)</h3>
+            {/* Título de Máximas dinâmico baseado no filtro */}
+            <h3 className="section-title">⚠️ MÁXIMAS S/ {nomeMercadoAtual}</h3>
             <div className="list-container">
               {estatisticasComp.map((comp, i) => (
                 <div key={i} className="maxima-item"><span className="m-label">{comp.liga}</span><div className="m-value-box"><span className="m-num">{comp.jogos_sem_ambas}</span><span className="m-text">JOGOS SEGUIDOS</span></div></div>
@@ -442,8 +507,23 @@ function App() {
       <div className="bottom-section" style={!isAdmin ? {marginTop: '50px'} : {}}>
         {!isAdmin && <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px', fontSize: '28px'}}>TH JURUNAS <span>SYSTEM</span></h2>}
 
-        <div className="league-tabs">
-          {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
+        {/* 🔥 FILTROS DA LIGA E DO MERCADO */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="league-tabs" style={{ marginBottom: 0 }}>
+            {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#888' }}>MERCADO:</span>
+            <select 
+              className="flet-input" 
+              style={{ width: 'auto', padding: '8px 15px', borderRadius: '8px', border: '1px solid #9FC131', color: '#9FC131', fontWeight: 'bold', cursor: 'pointer' }}
+              value={mercadoAtivo}
+              onChange={(e) => setMercadoAtivo(e.target.value)}
+            >
+              {mercadosDrop.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
         </div>
 
         <div className="matriz-container">
@@ -461,14 +541,66 @@ function App() {
 
           <div className="grid-matriz-wrapper">
             <div className="grid-matriz">
+              
+              {/* ESTATÍSTICAS DO TOPO */}
+              <div style={{display: 'contents'}}>
+                <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
+                {minutosCols.map(min => (
+                  <div key={`stat-${min}`} className="grid-cell top-stat-cell">
+                    <span style={{color: '#ffcc00', fontWeight: 'bold', fontSize: '11px', lineHeight: '1'}}>{statsPorMinuto[min].greens}</span>
+                    <span style={{color: '#9FC131', fontSize: '9px', lineHeight: '1', marginTop: '2px'}}>{statsPorMinuto[min].perc}%</span>
+                  </div>
+                ))}
+                <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
+                <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
+              </div>
+
+              {/* CABEÇALHOS */}
               <div className="grid-cell header-cell">H/M</div>
               {minutosCols.map(min => <div key={`h-${min}`} className="grid-cell header-cell">{min}</div>)}
-              {horasParaMostrar.map(hora => (
-                <div style={{display: 'contents'}} key={`row-${hora}`}>
-                  <div className="grid-cell hour-cell">{hora}h</div>
-                  {minutosCols.map(min => renderCell(hora, min))}
-                </div>
-              ))}
+              <div className="grid-cell header-cell" style={{fontSize: '11px'}}>Dados</div>
+              <div className="grid-cell header-cell" style={{fontSize: '14px'}}>⚽</div>
+
+              {/* ROWS E ESTATÍSTICAS DA DIREITA */}
+              {horasParaMostrar.map(hora => {
+                let totalValidosRow = 0;
+                let totalGreensRow = 0;
+                let totalGolsRow = 0;
+
+                const linhaDados = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
+                if (linhaDados && linhaDados.resultados) {
+                  Object.values(linhaDados.resultados).forEach(jogo => {
+                    if (jogo.placar !== "-" && jogo.placar) {
+                      totalValidosRow++;
+                      if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
+                      
+                      const pParts = String(jogo.placar).split("-");
+                      if (pParts.length === 2) {
+                        const c = parseInt(pParts[0].trim(), 10);
+                        const f = parseInt(pParts[1].trim(), 10);
+                        if (!isNaN(c) && !isNaN(f)) {
+                          totalGolsRow += (c + f);
+                        }
+                      }
+                    }
+                  });
+                }
+                const percRow = totalValidosRow > 0 ? Math.round((totalGreensRow / totalValidosRow) * 100) : 0;
+
+                return (
+                  <div style={{display: 'contents'}} key={`row-${hora}`}>
+                    <div className="grid-cell hour-cell">{hora}h</div>
+                    {minutosCols.map(min => renderCell(hora, min))}
+                    
+                    <div className="grid-cell side-stat-cell">
+                      ({percRow}%)
+                    </div>
+                    <div className="grid-cell side-stat-cell" style={{color: '#fff'}}>
+                      {totalGolsRow}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

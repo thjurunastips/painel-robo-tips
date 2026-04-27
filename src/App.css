@@ -10,12 +10,13 @@
   --text-muted: #888888;
 }
 
-body {
+body, html, #root {
   margin: 0;
   padding: 0;
-  background-color: var(--bg-color);
-  color: var(--text-main);
+  background-color: var(--bg-color) !important;
+  color: var(--text-main) !important;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  min-height: 100vh;
 }
 
 /* ========================================================= */
@@ -28,6 +29,40 @@ body {
   padding: 20px;
   max-width: 1400px;
   margin: 0 auto;
+  background-color: var(--bg-color);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.top-bar-user {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 30px;
+  background: rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+}
+
+.user-info {
+  color: var(--accent-color);
+  font-weight: bold;
+}
+
+.btn-logout {
+  background: transparent;
+  color: #ff4444;
+  border: 1px solid rgba(255, 68, 68, 0.5);
+  border-radius: 5px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: 0.3s;
+}
+
+.btn-logout:hover {
+  background: rgba(255, 68, 68, 0.1);
+  border-color: #ff4444;
 }
 
 .top-section {
@@ -186,28 +221,22 @@ body {
 
 .matriz-header h3 { color: var(--accent-color); margin: 0; }
 
-.matriz-stats {
-  display: flex;
-  gap: 15px;
-  align-items: center;
-}
-
-.stat-green { background: #1e7a3a; padding: 6px 12px; border-radius: 5px; font-weight: bold; }
-.stat-league { color: #f1c40f; font-weight: bold; font-size: 18px; text-transform: uppercase; }
-.stat-red { background: #a82030; padding: 6px 12px; border-radius: 5px; font-weight: bold; }
-
 .grid-matriz-wrapper {
+  width: 100%;
   overflow-x: auto; /* Permite rolar para o lado se a tela for pequena */
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 10px;
 }
 
 .grid-matriz {
   display: grid;
-  /* Cria exatas 21 colunas: 1 pra hora e 20 pros minutos */
-  grid-template-columns: 40px repeat(20, minmax(28px, 1fr));
+  /* 1 (H/M) + 20 (Minutos) + 2 (Estatísticas) = 23 Colunas */
+  grid-template-columns: 45px repeat(20, minmax(32px, 1fr)) minmax(45px, 1fr) minmax(35px, 1fr); 
   gap: 2px;
-  background-color: #222;
+  background: #2a2a2a;
   border: 1px solid #444;
-  min-width: 700px; /* Garante que não vai espremer muito */
+  border-radius: 6px;
+  min-width: 850px; /* Garante o visual perfeito no celular ativando o scroll */
 }
 
 .grid-cell {
@@ -216,16 +245,26 @@ body {
   align-items: center;
   font-size: 10px;
   font-weight: bold;
-  height: 28px;
+  height: 34px;
   color: white;
 }
 
 .header-cell { background: #333; color: #ccc; border-bottom: 1px solid #555; }
 .hour-cell { background: #111; color: var(--accent-color); border-right: 1px solid #444; }
 
+/* Novas Células de Estatísticas */
+.top-stat-cell {
+  flex-direction: column;
+  background: #111;
+  border-bottom: 1px solid var(--border-color);
+}
+.side-stat-cell {
+  background: #111;
+  color: var(--accent-color);
+}
+
 .bg-green { background-color: #218838; }
 .bg-red { background-color: #c82333; }
-.bg-yellow { background-color: #e0a800; color: #000; }
 .empty-cell { background-color: #000; color: #333; }
 
 /* ========================================================= */
@@ -235,7 +274,7 @@ body {
   display: flex;
   justify-content: center;
   gap: 10px;
-  margin-bottom: -10px; /* Puxa a matriz um pouco pra cima */
+  margin-bottom: -10px;
   position: relative;
   z-index: 10;
 }
@@ -262,38 +301,11 @@ body {
   background-color: var(--panel-bg);
   color: var(--accent-color);
   border-color: var(--border-color);
-  border-top: 2px solid var(--accent-color); /* Destaque superior verde */
-}
-/* =======================================
-   ANIMAÇÃO: MÁXIMAS PISCANDO (ALERTA)
-   ======================================= */
-.blink-maxima {
-  animation: piscarAlerta 1.2s infinite alternate !important;
-  box-shadow: inset 0 0 5px rgba(255, 255, 255, 0.5);
-}
-@keyframes piscarMaxima {
-  0% { box-shadow: 0 0 0px #00f2fe; border-color: #00f2fe; }
-  50% { box-shadow: 0 0 12px #00f2fe; border-color: #ffffff; }
-  100% { box-shadow: 0 0 0px #00f2fe; border-color: #00f2fe; }
-}
-
-@keyframes piscarAlerta {
-  0% {
-    opacity: 1;
-    filter: brightness(1);
-  }
-  100% {
-    opacity: 0.3;
-    filter: brightness(1.8);
-    transform: scale(0.95);
-  }
+  border-top: 2px solid var(--accent-color);
 }
 
 /* =======================================
-   DESTAQUE: PLACAR SELECIONADO (FILTRO)
-   ======================================= */
-   /* =======================================
-   ANIMAÇÕES DE RADAR (MÁXIMAS E FILTRO)
+   ANIMAÇÕES E DESTAQUES (ALERTA E FILTRO)
    ======================================= */
 .blink-maxima {
   animation: piscarAlerta 1.2s infinite alternate !important;
@@ -314,17 +326,7 @@ body {
   color: #fff !important;
 }
 
-/* =======================================
-   MOTOR DE GATILHOS (SINAIS E ALVOS)
-   ======================================= */
-.trigger-cell {
-  /* Laranja para mostrar onde a sequência aconteceu */
-  box-shadow: inset 0 0 0 3px #ff9900 !important;
-  opacity: 0.9;
-}
-
 .target-cell {
-  /* Alvo futurista piscando em ciano (Neon) */
   box-shadow: inset 0 0 0 2px #00f2fe, 0 0 12px #00f2fe !important;
   animation: piscarAlvo 1s infinite alternate !important;
   background-image: repeating-linear-gradient(45deg, rgba(0, 242, 254, 0.15) 0, rgba(0, 242, 254, 0.15) 3px, transparent 3px, transparent 6px) !important;
@@ -337,6 +339,7 @@ body {
   0% { transform: scale(1); filter: brightness(1); }
   100% { transform: scale(1.1); filter: brightness(1.5); z-index: 20; }
 }
+
 /* =======================================
    TELA DE LOGIN
    ======================================= */
@@ -365,57 +368,64 @@ body {
   margin-bottom: 5px;
   font-weight: bold;
 }
+
 /* =======================================
-   RESPONSIVIDADE (MOBILE)
+   RESPONSIVIDADE MÓVEL (CELULAR) UNIFICADA
    ======================================= */
 @media (max-width: 768px) {
+  /* Empilha a barra superior */
+  .top-bar-user {
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px;
+    text-align: center;
+  }
+
   /* Empilha os painéis do Administrador na vertical */
   .top-section {
-    flex-direction: column;
+    grid-template-columns: 1fr;
     align-items: center;
     gap: 20px;
   }
+
+  .col-ranking, .col-maximas { order: 2; }
+  .col-center { order: 1; }
 
   .col-ranking, .col-center, .col-maximas {
     width: 100%;
     max-width: 100%;
     margin: 0;
+    box-sizing: border-box;
   }
 
-  /* Arruma o Logo que estava quebrando */
+  /* Garante que o Logo nunca fique branco no fundo branco */
   .main-logo {
-    font-size: 22px !important;
+    font-size: 24px !important;
     text-align: center;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 5px;
+    margin-top: 10px !important;
+    margin-bottom: 20px !important;
+    color: #ffffff !important; 
+    background-color: transparent !important;
   }
 
-  /* Ajusta os botões das ligas para não vazarem da tela */
+  /* Ajusta os botões das ligas para não vazarem da tela (2x2) */
   .league-tabs {
+    display: flex;
     flex-wrap: wrap;
+    gap: 8px;
     justify-content: center;
-    gap: 5px;
+    padding: 0 10px;
   }
   
   .tab-btn {
-    font-size: 12px;
-    padding: 8px 12px;
-  }
-
-  /* O Segredo do Radar: Permite rolar para os lados sem quebrar o site */
-  .grid-matriz-wrapper {
-    width: 100%;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 15px; /* Espaço para a barra de rolagem */
-    border-radius: 8px;
-  }
-
-  .grid-matriz {
-    /* Força a tabela a ter o tamanho mínimo necessário para não espremer os quadrados */
-    min-width: 900px; 
+    flex: 1 1 40%;
+    font-size: 13px;
+    padding: 10px;
+    margin: 0;
   }
 
   /* Ajusta o cabeçalho do usuário logado */
@@ -431,90 +441,5 @@ body {
     flex-direction: column;
     gap: 10px;
     text-align: center;
-  }
-}
-/* =======================================
-   CORREÇÕES GLOBAIS E MODO ESCURO
-   ======================================= */
-body, html, #root {
-  background-color: #121212 !important; /* Mata a caixa branca na raiz */
-  color: #ffffff !important;
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-}
-
-.dashboard-wrapper {
-  background-color: #121212;
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-/* Nova Barra Superior Limpa */
-.top-bar-user {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px 30px;
-  background: rgba(255,255,255,0.05);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-
-.user-info {
-  color: #9FC131;
-  font-weight: bold;
-}
-
-.btn-logout {
-  background: transparent;
-  color: #ff4444;
-  border: 1px solid rgba(255, 68, 68, 0.5);
-  border-radius: 5px;
-  padding: 6px 12px;
-  cursor: pointer;
-  font-weight: bold;
-  transition: 0.3s;
-}
-
-.btn-logout:hover {
-  background: rgba(255, 68, 68, 0.1);
-  border-color: #ff4444;
-}
-
-/* =======================================
-   RESPONSIVIDADE MÓVEL (CELULAR)
-   ======================================= */
-@media (max-width: 768px) {
-  /* Empilha a barra superior */
-  .top-bar-user {
-    flex-direction: column;
-    gap: 15px;
-    padding: 15px;
-    text-align: center;
-  }
-
-  /* Garante que o Logo nunca fique branco no fundo branco */
-  .main-logo {
-    font-size: 24px !important;
-    margin-top: 10px !important;
-    margin-bottom: 20px !important;
-    color: #ffffff !important; 
-    background-color: transparent !important;
-  }
-
-  /* Deixa os botões das ligas 2x2 para não vazarem da tela */
-  .league-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    padding: 0 10px;
-  }
-
-  .tab-btn {
-    flex: 1 1 40%; /* 40% faz com que caibam 2 por linha */
-    font-size: 13px;
-    padding: 10px;
-    margin: 0;
   }
 }
