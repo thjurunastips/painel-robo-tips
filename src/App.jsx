@@ -17,6 +17,9 @@ function App() {
   const [matrizJogos, setMatrizJogos] = useState([]);
   const [sinaisAtivos, setSinaisAtivos] = useState([]);
   
+  // 🔥 NOVO: Estado para guardar as dicas da Inteligência Artificial
+  const [dicasIA, setDicasIA] = useState([]);
+  
   const [nome, setNome] = useState('');
   const [sequencia, setSequencia] = useState([]);
   const [inputValor, setInputValor] = useState('');
@@ -41,30 +44,20 @@ function App() {
   const efetuarLogin = async (e) => {
     e.preventDefault();
     setErroLogin('');
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('email', loginEmail)
-      .eq('senha', loginSenha)
-      .single();
+    const { data, error } = await supabase.from('usuarios').select('*').eq('email', loginEmail).eq('senha', loginSenha).single();
     if (error || !data) setErroLogin('Usuário ou senha incorretos!');
     else setUsuarioLogado(data);
   };
 
   const fazerLogout = () => {
-    setUsuarioLogado(null);
-    setLoginEmail('');
-    setLoginSenha('');
+    setUsuarioLogado(null); setLoginEmail(''); setLoginSenha('');
   };
 
   const cadastrarCliente = async () => {
-    if (!novoUserEmail || !novoUserSenha) return alert("Preencha email e senha do cliente!");
+    if (!novoUserEmail || !novoUserSenha) return alert("Preencha email e senha!");
     const { error } = await supabase.from('usuarios').insert([{ email: novoUserEmail, senha: novoUserSenha, role: 'user' }]);
-    if (error) alert("❌ Erro ao cadastrar: " + error.message);
-    else {
-      alert("✅ Cliente cadastrado com sucesso!");
-      setNovoUserEmail(''); setNovoUserSenha('');
-    }
+    if (error) alert("❌ Erro: " + error.message);
+    else { alert("✅ Cliente cadastrado!"); setNovoUserEmail(''); setNovoUserSenha(''); }
   };
 
   const sortHoursDescending = (horasArray) => {
@@ -89,22 +82,21 @@ function App() {
 
   async function buscarDados() {
     setErroDB('');
-    const { data: est, error: erroEst } = await supabase.from('estrategias').select('*').order('created_at', { ascending: false });
+    const { data: est } = await supabase.from('estrategias').select('*').order('created_at', { ascending: false });
     if (est) setEstrategias([...est]);
 
+    // 🔥 NOVO: Busca as dicas fresquinhas da IA
+    const { data: iaData } = await supabase.from('dicas_ia').select('*').order('assertividade', { ascending: false });
+    if (iaData) setDicasIA([...iaData]);
+
     const { data: matriz, error: erroMat } = await supabase.from('matriz_resultados').select('*').limit(500);
-    if (erroMat) {
-      setErroDB("Erro ao carregar matriz: " + erroMat.message);
-    } else if (matriz) {
-      setMatrizJogos([...matriz]); 
-      setUltimaAtualizacao(new Date().toLocaleTimeString()); 
-    }
+    if (erroMat) setErroDB("Erro matriz: " + erroMat.message);
+    else if (matriz) { setMatrizJogos([...matriz]); setUltimaAtualizacao(new Date().toLocaleTimeString()); }
   }
 
   const deletarEstrategia = async (id) => {
-    const { error } = await supabase.from('estrategias').delete().eq('id', id);
-    if (error) alert("Erro ao excluir: " + error.message);
-    else buscarDados();
+    await supabase.from('estrategias').delete().eq('id', id);
+    buscarDados();
   };
 
   const normalizar = (texto) => String(texto).trim().toLowerCase();
@@ -132,10 +124,8 @@ function App() {
     if (!placar || placar === "-") return "empty-cell";
     const [c, f] = String(placar).split("-").map(Number);
     if (isNaN(c) || isNaN(f)) return "empty-cell";
-    
     const total = c + f;
     let isGreen = false;
-
     switch (mercado) {
       case 'AMBAS': isGreen = (c > 0 && f > 0); break;
       case 'AMBAS_NAO': isGreen = (c === 0 || f === 0); break;
@@ -162,9 +152,7 @@ function App() {
             if (!timesStats[jogo.away]) timesStats[jogo.away] = { jogos: 0, hits: 0 };
             timesStats[jogo.home].jogos += 1;
             timesStats[jogo.away].jogos += 1;
-            
-            const corDinamica = calcularCorDinamica(jogo.placar, mercadoAtivo);
-            if (corDinamica === 'bg-green') {
+            if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') {
               timesStats[jogo.home].hits += 1;
               timesStats[jogo.away].hits += 1;
             }
@@ -181,82 +169,61 @@ function App() {
     setRankingTimes(rankingArray.slice(0, 10));
 
     let alertasGerados = [];
-    
     ligasUnicas.forEach(ligaNome => {
       const linhasDessaLiga = dadosMatriz.filter(m => m.liga === ligaNome);
-      let todosJogosLiga = [];
-      
+      let flatJogos = [];
       linhasDessaLiga.forEach(linha => {
         if (!linha.resultados) return;
         Object.keys(linha.resultados).forEach(min => {
           const jogo = linha.resultados[min];
-          if (jogo.placar !== "-") {
-            todosJogosLiga.push({ 
-              hora: Number(linha.hora), 
-              min: Number(min), 
-              placar: jogo.placar,
-              corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) 
-            });
-          }
+          flatJogos.push({ hora: Number(linha.hora), min: Number(min), placar: jogo.placar, corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
         });
       });
 
-      const horasDaLiga = sortHoursDescending([...new Set(todosJogosLiga.map(j => j.hora))]);
-
-      horasDaLiga.forEach(horaAtual => {
-        const jogosDessaHora = todosJogosLiga.filter(j => j.hora === horaAtual).sort((a, b) => a.min - b.min);
-
-        estrategias.forEach(est => {
-          let padraoArray = [];
-          try { padraoArray = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } 
-          catch(e) { return; }
-          
-          if (!padraoArray || padraoArray.length === 0 || !est.ativa) return;
-          const padrao = padraoArray.map(p => p.valor);
-          const tamanho = padrao.length;
-
-          for (let i = 0; i <= jogosDessaHora.length - tamanho; i++) {
-            let match = true;
-            let minsGatilho = [];
-            
-            for (let j = 0; j < tamanho; j++) {
-              if (!checarPlacar(jogosDessaHora[i+j].placar, padrao[j])) {
-                match = false; break;
-              }
-              minsGatilho.push(jogosDessaHora[i+j].min); 
-            }
-            
-            if (match) {
-              let horaAlvo = horaAtual + 1;
-              if (horaAlvo >= 24) horaAlvo -= 24;
-
-              alertasGerados.push({
-                liga: ligaNome,
-                horaAlvo: horaAlvo,        
-                minutosAlvo: minsGatilho     
-              });
-            }
-          }
-        });
-      });
-
+      const horasUnicas = [...new Set(flatJogos.map(j => j.hora))];
+      const horasDesc = sortHoursDescending(horasUnicas);
       const hourAge = {};
-      horasDaLiga.forEach((h, idx) => hourAge[h] = idx);
+      horasDesc.forEach((h, idx) => hourAge[h] = idx);
 
-      todosJogosLiga.sort((a, b) => {
+      flatJogos.sort((a, b) => {
         if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[b.hora] - hourAge[a.hora]; 
         return a.min - b.min; 
       });
 
-      let maxStreak = 0;
-      let currentStreak = 0;
-      todosJogosLiga.forEach(jogo => {
-        if (jogo.corDinamica === 'bg-red') {
-          currentStreak++;
-          if (currentStreak > maxStreak) maxStreak = currentStreak;
-        } else if (jogo.corDinamica === 'bg-green') {
-          currentStreak = 0;
+      estrategias.forEach(est => {
+        let padraoArray = [];
+        try { padraoArray = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } catch(e) { return; }
+        if (!padraoArray || padraoArray.length === 0 || !est.ativa) return;
+        const padrao = padraoArray.map(p => p.valor);
+        const tamanho = padrao.length;
+
+        if (flatJogos.length >= tamanho) {
+          for (let i = 0; i <= flatJogos.length - tamanho; i++) {
+            let janela = flatJogos.slice(i, i + tamanho);
+            if (janela.some(j => j.placar === "-")) continue;
+
+            let match = true;
+            let minsGatilho = [];
+            let jogosGat = [];
+            for (let j = 0; j < tamanho; j++) {
+              if (!checarPlacar(janela[j].placar, padrao[j])) { match = false; break; }
+              minsGatilho.push(janela[j].min);
+              jogosGat.push({ hora: janela[j].hora, min: janela[j].min });
+            }
+            if (match) {
+              let horaUltimoJogo = janela[tamanho - 1].hora;
+              let horaAlvo = horaUltimoJogo + 1;
+              if (horaAlvo >= 24) horaAlvo -= 24;
+              alertasGerados.push({ liga: ligaNome, horaAlvo: horaAlvo, minutosAlvo: minsGatilho, jogosGatilho: jogosGat });
+            }
+          }
         }
+      });
+
+      let maxStreak = 0; let currentStreak = 0;
+      flatJogos.filter(j => j.placar !== "-").forEach(jogo => {
+        if (jogo.corDinamica === 'bg-red') { currentStreak++; if (currentStreak > maxStreak) maxStreak = currentStreak; } 
+        else if (jogo.corDinamica === 'bg-green') currentStreak = 0;
       });
       maximasPorLiga.push({ liga: ligaNome, jogos_sem_ambas: maxStreak });
     });
@@ -276,7 +243,14 @@ function App() {
     if (!nome || sequencia.length === 0) return alert("Preencha o nome e a sequência!");
     const { error } = await supabase.from('estrategias').insert([{ nome, padrao_visual: sequencia, ativa: true }]);
     if (error) alert("❌ Erro ao salvar: " + error.message);
-    else { setNome(''); setSequencia([]); buscarDados(); }
+    else { setNome(''); setSequencia([]); buscarDados(); window.scrollTo(0, 0); }
+  };
+
+  // 🔥 NOVO: Função que o botão "Copiar Gatilho" chama
+  const copiarDicaIA = (dica) => {
+    setNome(`🎯 Auto I.A: ${dica.liga}`);
+    setSequencia(dica.padrao);
+    window.scrollTo({ top: 0, behavior: 'smooth' }); // Sobe a tela para o admin salvar
   };
 
   if (!usuarioLogado) {
@@ -318,25 +292,16 @@ function App() {
   minutosDinamicos.sort((a, b) => a - b);
   const minutosCols = minutosDinamicos.length > 0 ? minutosDinamicos : [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58];
 
-  let celulasMaxima = [];
-  let streakAtual = [];
-  
+  let celulasMaxima = []; let streakAtual = [];
   const horasDescLocal = sortHoursDescending([...new Set(linhasDaLiga.map(m => Number(m.hora)))]);
-  const hourAgeLocal = {};
-  horasDescLocal.forEach((h, idx) => hourAgeLocal[h] = idx);
+  const hourAgeLocal = {}; horasDescLocal.forEach((h, idx) => hourAgeLocal[h] = idx);
   
   let todosJogosRadar = [];
   linhasDaLiga.forEach(linha => {
     if(linha.resultados) {
       Object.keys(linha.resultados).forEach(min => {
         const jogo = linha.resultados[min];
-        if (jogo.placar !== "-") {
-          todosJogosRadar.push({ 
-            hora: Number(linha.hora), 
-            min: Number(min), 
-            corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo)
-          });
-        }
+        if (jogo.placar !== "-") todosJogosRadar.push({ hora: Number(linha.hora), min: Number(min), corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
       });
     }
   });
@@ -347,20 +312,14 @@ function App() {
   });
 
   todosJogosRadar.forEach(jogo => {
-    if (jogo.corDinamica === 'bg-red') {
-      streakAtual.push(`${jogo.hora}-${jogo.min}`);
-      if (streakAtual.length > celulasMaxima.length) celulasMaxima = [...streakAtual];
-    } else if (jogo.corDinamica === 'bg-green') streakAtual = [];
+    if (jogo.corDinamica === 'bg-red') { streakAtual.push(`${jogo.hora}-${jogo.min}`); if (streakAtual.length > celulasMaxima.length) celulasMaxima = [...streakAtual]; } 
+    else if (jogo.corDinamica === 'bg-green') streakAtual = [];
   });
   const setMaximas = new Set(celulasMaxima);
 
-  // ========================================================
-  // 🔥 LÓGICA DE ESTATÍSTICAS TOP (POR MINUTO) 
-  // ========================================================
   const statsPorMinuto = {};
   minutosCols.forEach(min => {
-    let totalValidos = 0;
-    let totalGreens = 0;
+    let totalValidos = 0; let totalGreens = 0;
     linhasDaLiga.forEach(linha => {
       if (linha.resultados && linha.resultados[String(min)]) {
         const jogo = linha.resultados[String(min)];
@@ -370,13 +329,13 @@ function App() {
         }
       }
     });
-    const perc = totalValidos > 0 ? Math.round((totalGreens / totalValidos) * 100) : 0;
-    statsPorMinuto[min] = { greens: totalGreens, perc };
+    statsPorMinuto[min] = { greens: totalGreens, perc: totalValidos > 0 ? Math.round((totalGreens / totalValidos) * 100) : 0 };
   });
 
   const renderCell = (hora, min) => {
     const chave = `${hora}-${min}`;
     const isTarget = sinaisAtivos.some(s => s.liga === ligaSelecionada && s.horaAlvo === Number(hora) && s.minutosAlvo.includes(Number(min)));
+    const isTrigger = sinaisAtivos.some(s => s.liga === ligaSelecionada && s.jogosGatilho && s.jogosGatilho.some(jg => jg.hora === Number(hora) && jg.min === Number(min)));
 
     if (matrizJogos.length > 0) {
       const linha = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
@@ -384,43 +343,22 @@ function App() {
         const res = linha.resultados[String(min)];
         const isMaxima = setMaximas.has(chave);
         const isSelected = placarFiltro === res.placar;
-        
         const corDefinitiva = calcularCorDinamica(res.placar, mercadoAtivo);
 
         let classesExtras = "";
         if (isAdmin && isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
+        if (isAdmin && isTrigger) classesExtras += " trigger-cell";
         if (isAdmin && isTarget) classesExtras += " target-cell";
         
-        const isFuturo = res.placar === "-";
-        const oddVeioVazia = res.odd_sim === "None" || !res.odd_sim || res.odd_sim === "-";
-
         return (
-          <div 
-            key={chave} 
-            className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} 
-            title={`${res.home || '?'} x ${res.away || '?'}`} 
-            onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} 
-            style={{ 
-              cursor: 'pointer', display: 'flex', flexDirection: 'column',
-              justifyContent: 'center', alignItems: 'center', lineHeight: '1.2'
-            }}
-          >
-            {isFuturo ? (
-               oddVeioVazia ? (
-                 <div style={{ color: '#888', fontSize: '8px' }}> - </div>
-               ) : (
-                 <div style={{ color: '#ffcc00', fontSize: '10px', fontWeight: 'bold' }}>{res.odd_sim}</div>
-               )
-            ) : (
-               res.placar
-            )}
+          <div key={chave} className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', lineHeight: '1.2' }}>
+            {res.placar === "-" ? ( (res.odd_sim === "None" || !res.odd_sim || res.odd_sim === "-") ? <div style={{ color: '#888', fontSize: '8px' }}> - </div> : <div style={{ color: '#ffcc00', fontSize: '10px', fontWeight: 'bold' }}>{res.odd_sim}</div> ) : res.placar}
           </div>
         );
       }
-      return <div key={chave} className={`grid-cell empty-cell ${isAdmin && isTarget ? 'target-cell' : ''}`}>-</div>;
     }
-    return <div key={chave} className="grid-cell empty-cell">-</div>;
+    return <div key={chave} className={`grid-cell empty-cell ${isAdmin && isTarget ? 'target-cell' : ''}`}>-</div>;
   };
 
   const sinaisDessaLiga = sinaisAtivos.filter(s => s.liga === ligaSelecionada);
@@ -432,8 +370,6 @@ function App() {
         <div className="user-info">👤 Logado como: {usuarioLogado.email} {isAdmin ? '(ADMIN)' : '(CLIENTE)'}</div>
         <button className="btn-logout" onClick={fazerLogout}>SAIR DO SISTEMA</button>
       </div>
-
-      {erroDB && <div style={{background: '#ff4444', color: '#fff', padding: '10px', textAlign: 'center', fontWeight: 'bold'}}>{erroDB}</div>}
 
       {isAdmin && (
         <div className="top-section">
@@ -459,6 +395,36 @@ function App() {
               </div>
               <div className="preview-timeline">{sequencia.map((s) => <div key={s.id} className="mini-flet-box" onClick={() => setSequencia(sequencia.filter(x => x.id !== s.id))}>{s.valor}</div>)}</div>
               <button className="btn-flet-save" style={{marginTop: '15px'}} onClick={salvarDados}>ATIVAR NOVO GATILHO</button>
+            </div>
+
+            {/* 🔥 NOVO BLOCO: RADAR DA INTELIGÊNCIA ARTIFICIAL */}
+            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)'}}>
+              <h3 className="section-title" style={{marginBottom: '10px', color: '#00f2fe'}}>🤖 RADAR I.A. (PADRÕES OURO)</h3>
+              <div style={{fontSize: '12px', color: '#ccc', marginBottom: '15px'}}>
+                A Inteligência Artificial analisa o histórico absoluto de jogos e sugere padrões com mais de 80% de assertividade:
+              </div>
+              
+              {dicasIA.length === 0 ? (
+                <div style={{color: '#888', fontSize: '13px', textAlign: 'center'}}>Nenhum padrão forte encontrado hoje ainda.</div>
+              ) : (
+                <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                  {dicasIA.map((dica, idx) => (
+                    <div key={idx} className="ia-dica-card" style={{background: '#1a1a1a', padding: '10px', borderRadius: '8px', borderLeft: '3px solid #00f2fe'}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                        <span style={{fontWeight: 'bold', color: '#ffcc00'}}>{dica.liga}</span>
+                        <span style={{color: '#9FC131', fontWeight: 'bold'}}>{dica.assertividade}% Win Rate</span>
+                      </div>
+                      <div style={{marginTop: '8px', display: 'flex', gap: '5px', flexWrap: 'wrap'}}>
+                         {dica.padrao.map((p, pIdx) => <span key={pIdx} className="mini-flet-box">{p.valor}</span>)}
+                      </div>
+                      <div style={{fontSize: '10px', color: '#888', marginTop: '5px'}}>Ocorreu {dica.amostras} vezes recentemente.</div>
+                      <button className="btn-flet-save" style={{marginTop: '10px', padding: '5px 10px', fontSize: '11px', background: '#00f2fe', color: '#000', width: '100%'}} onClick={() => copiarDicaIA(dica)}>
+                        ⚡ COPIAR E ATIVAR GATILHO
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)'}}>
@@ -525,7 +491,6 @@ function App() {
             </h3>
             <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
               {ultimaAtualizacao && <span style={{fontSize: '11px', color: '#888'}}>Atualizado às {ultimaAtualizacao}</span>}
-              
               {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
             </div>
           </div>
@@ -533,12 +498,11 @@ function App() {
           <div className="grid-matriz-wrapper">
             <div className="grid-matriz">
               
-              {/* ESTATÍSTICAS DO TOPO */}
               <div style={{display: 'contents'}}>
                 <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
                 {minutosCols.map(min => {
                   const s = statsPorMinuto[min];
-                  const corPerc = s.perc >= 50 ? '#9FC131' : '#ff4444'; // 🔥 Verde se >= 50%, Vermelho se < 50%
+                  const corPerc = s.perc >= 50 ? '#9FC131' : '#ff4444'; 
                   return (
                     <div key={`stat-${min}`} className="grid-cell top-stat-cell">
                       <span style={{color: '#ffcc00', fontWeight: 'bold', fontSize: '11px', lineHeight: '1'}}>{s.greens}</span>
@@ -550,50 +514,37 @@ function App() {
                 <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
               </div>
 
-              {/* CABEÇALHOS */}
               <div className="grid-cell header-cell">H/M</div>
               {minutosCols.map(min => <div key={`h-${min}`} className="grid-cell header-cell">{min}</div>)}
               <div className="grid-cell header-cell" style={{fontSize: '11px'}}>Dados</div>
               <div className="grid-cell header-cell" style={{fontSize: '14px'}}>⚽</div>
 
-              {/* ROWS E ESTATÍSTICAS DA DIREITA */}
               {horasParaMostrar.map(hora => {
-                let totalValidosRow = 0;
-                let totalGreensRow = 0;
-                let totalGolsRow = 0;
-
+                let totalValidosRow = 0; let totalGreensRow = 0; let totalGolsRow = 0;
                 const linhaDados = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
                 if (linhaDados && linhaDados.resultados) {
                   Object.values(linhaDados.resultados).forEach(jogo => {
                     if (jogo.placar !== "-" && jogo.placar) {
                       totalValidosRow++;
                       if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
-                      
                       const pParts = String(jogo.placar).split("-");
                       if (pParts.length === 2) {
                         const c = parseInt(pParts[0].trim(), 10);
                         const f = parseInt(pParts[1].trim(), 10);
-                        if (!isNaN(c) && !isNaN(f)) {
-                          totalGolsRow += (c + f);
-                        }
+                        if (!isNaN(c) && !isNaN(f)) totalGolsRow += (c + f);
                       }
                     }
                   });
                 }
                 const percRow = totalValidosRow > 0 ? Math.round((totalGreensRow / totalValidosRow) * 100) : 0;
-                const corPercRow = percRow >= 50 ? '#9FC131' : '#ff4444'; // 🔥 Verde se >= 50%, Vermelho se < 50%
+                const corPercRow = percRow >= 50 ? '#9FC131' : '#ff4444';
 
                 return (
                   <div style={{display: 'contents'}} key={`row-${hora}`}>
                     <div className="grid-cell hour-cell">{hora}h</div>
                     {minutosCols.map(min => renderCell(hora, min))}
-                    
-                    <div className="grid-cell side-stat-cell" style={{ color: corPercRow }}>
-                      ({percRow}%)
-                    </div>
-                    <div className="grid-cell side-stat-cell" style={{color: '#fff'}}>
-                      {totalGolsRow}
-                    </div>
+                    <div className="grid-cell side-stat-cell" style={{ color: corPercRow }}>({percRow}%)</div>
+                    <div className="grid-cell side-stat-cell" style={{color: '#fff'}}>{totalGolsRow}</div>
                   </div>
                 );
               })}
