@@ -18,6 +18,8 @@ function App() {
   const [sinaisAtivos, setSinaisAtivos] = useState([]);
   const [dicasIA, setDicasIA] = useState([]);
   
+  const [listaClientes, setListaClientes] = useState([]);
+  
   const [nome, setNome] = useState('');
   const [sequencia, setSequencia] = useState([]);
   const [inputValor, setInputValor] = useState('');
@@ -26,13 +28,19 @@ function App() {
   const [placarFiltro, setPlacarFiltro] = useState(null); 
   const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
 
-  // 🔥 ESTADOS PARA OS MENUS SANFONA DO USUÁRIO MOBILE
   const [mostrarRankingMobile, setMostrarRankingMobile] = useState(false);
   const [mostrarMaximasMobile, setMostrarMaximasMobile] = useState(false);
+  
+  const [abaAtual, setAbaAtual] = useState(null); 
 
   const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
   const [erroDB, setErroDB] = useState('');
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('');
+
+  const [backtestInput, setBacktestInput] = useState('');
+  const [backtestLiga, setBacktestLiga] = useState('Todas');
+  const [resultadoBacktest, setResultadoBacktest] = useState(null);
+  const [carregandoBacktest, setCarregandoBacktest] = useState(false);
 
   const mercadosDrop = [
     { id: 'AMBAS', label: 'Ambas Marcam (Sim)' },
@@ -52,14 +60,20 @@ function App() {
   };
 
   const fazerLogout = () => {
-    setUsuarioLogado(null); setLoginEmail(''); setLoginSenha('');
+    setUsuarioLogado(null); setLoginEmail(''); setLoginSenha(''); setAbaAtual(null);
   };
 
   const cadastrarCliente = async () => {
     if (!novoUserEmail || !novoUserSenha) return alert("Preencha email e senha!");
-    const { error } = await supabase.from('usuarios').insert([{ email: novoUserEmail, senha: novoUserSenha, role: 'user' }]);
+    const { error } = await supabase.from('usuarios').insert([{ email: novoUserEmail, senha: novoUserSenha, role: 'user', acesso_backtest: false, acesso_ia: false }]);
     if (error) alert("❌ Erro: " + error.message);
-    else { alert("✅ Cliente cadastrado!"); setNovoUserEmail(''); setNovoUserSenha(''); }
+    else { alert("✅ Cliente cadastrado com sucesso!"); setNovoUserEmail(''); setNovoUserSenha(''); buscarDados(); }
+  };
+
+  const togglePermissao = async (id, campo, valorAtual) => {
+    const { error } = await supabase.from('usuarios').update({ [campo]: !valorAtual }).eq('id', id);
+    if (error) alert("Erro ao atualizar permissão: " + error.message);
+    else buscarDados(); 
   };
 
   const sortHoursDescending = (horasArray) => {
@@ -89,6 +103,11 @@ function App() {
 
     const { data: iaData } = await supabase.from('dicas_ia').select('*').order('assertividade', { ascending: false });
     if (iaData) setDicasIA([...iaData]);
+
+    if (usuarioLogado?.role === 'admin') {
+      const { data: users } = await supabase.from('usuarios').select('*').eq('role', 'user').order('created_at', { ascending: false });
+      if (users) setListaClientes(users);
+    }
 
     const { data: matriz, error: erroMat } = await supabase.from('matriz_resultados').select('*').limit(500);
     if (erroMat) setErroDB("Erro matriz: " + erroMat.message);
@@ -233,6 +252,87 @@ function App() {
     setEstatisticasComp(maximasPorLiga);
   };
 
+  const executarBacktest = async () => {
+    if (!backtestInput) return alert("Digite a sequência que deseja testar! Ex: +2.5, 0-1");
+    setCarregandoBacktest(true);
+    setResultadoBacktest(null);
+
+    const padraoArray = backtestInput.split(',').map(v => v.trim().toUpperCase()).filter(v => v !== "");
+    const tamanho = padraoArray.length;
+
+    try {
+      let query = supabase.from('historico_absoluto').select('*').order('data_jogo').order('hora').order('minuto');
+      if (backtestLiga !== 'Todas') {
+        query = query.eq('liga', backtestLiga);
+      }
+      
+      const { data: historico, error } = await query;
+      
+      if (error) throw error;
+      if (!historico || historico.length === 0) {
+        setResultadoBacktest({ erro: "Histórico vazio. O alimentador IA precisa rodar mais vezes." });
+        setCarregandoBacktest(false);
+        return;
+      }
+
+      const ligasJogos = {};
+      historico.forEach(j => {
+        if(!ligasJogos[j.liga]) ligasJogos[j.liga] = [];
+        ligasJogos[j.liga].push(j);
+      });
+
+      let tentativas = 0;
+      let greens = 0;
+
+      Object.values(ligasJogos).forEach(listaJogos => {
+        for (let i = 0; i <= listaJogos.length - tamanho - 1; i++) {
+          let janela = listaJogos.slice(i, i + tamanho);
+          
+          let match = true;
+          for (let j = 0; j < tamanho; j++) {
+            if (!checarPlacar(janela[j].placar, padraoArray[j])) {
+              match = false;
+              break;
+            }
+          }
+
+          if (match) {
+            tentativas++;
+            let greenBateu = false;
+            
+            for (let step = 0; step < 3; step++) {
+              let apostaIdx = i + tamanho + step;
+              if (apostaIdx < listaJogos.length) {
+                let jogoAposta = listaJogos[apostaIdx];
+                if (jogoAposta.placar !== "-" && calcularCorDinamica(jogoAposta.placar, mercadoAtivo) === 'bg-green') {
+                  greenBateu = true;
+                  break; 
+                }
+              }
+            }
+
+            if (greenBateu) {
+              greens++;
+            }
+          }
+        }
+      });
+
+      const assertividade = tentativas > 0 ? ((greens / tentativas) * 100).toFixed(1) : 0;
+
+      setResultadoBacktest({
+        tentativas,
+        greens,
+        assertividade,
+        mercadoNome: mercadosDrop.find(m => m.id === mercadoAtivo)?.label
+      });
+
+    } catch (err) {
+      alert("Erro ao fazer backtest: " + err.message);
+    }
+    setCarregandoBacktest(false);
+  };
+
   const adicionarBloco = () => {
     if (!inputValor) return;
     const novosBlocos = inputValor.split(',').map(v => v.trim().toUpperCase()).filter(v => v !== "").map(v => ({ id: Date.now() + Math.random(), valor: v }));
@@ -244,12 +344,13 @@ function App() {
     if (!nome || sequencia.length === 0) return alert("Preencha o nome e a sequência!");
     const { error } = await supabase.from('estrategias').insert([{ nome, padrao_visual: sequencia, ativa: true }]);
     if (error) alert("❌ Erro ao salvar: " + error.message);
-    else { setNome(''); setSequencia([]); buscarDados(); window.scrollTo(0, 0); }
+    else { setNome(''); setSequencia([]); buscarDados(); setAbaAtual(null); window.scrollTo(0, 0); }
   };
 
   const copiarDicaIA = (dica) => {
     setNome(`🎯 Auto I.A: ${dica.liga}`);
     setSequencia(dica.padrao);
+    setAbaAtual('GATILHOS'); 
     window.scrollTo({ top: 0, behavior: 'smooth' }); 
   };
 
@@ -272,6 +373,13 @@ function App() {
   }
 
   const isAdmin = usuarioLogado.role === 'admin';
+  const canViewBacktest = isAdmin || usuarioLogado.acesso_backtest;
+  const canViewIA = isAdmin || usuarioLogado.acesso_ia;
+  const canViewGatilhos = isAdmin;
+  const canViewClientes = isAdmin;
+  
+  const showMenuTop = canViewBacktest || canViewIA || canViewGatilhos || canViewClientes;
+
   const linhasDaLiga = matrizJogos.filter(m => normalizar(m.liga) === normalizar(ligaSelecionada));
   
   let hrsSet = new Set(linhasDaLiga.map(m => Number(m.hora)));
@@ -346,7 +454,6 @@ function App() {
         const corDefinitiva = calcularCorDinamica(res.placar, mercadoAtivo);
 
         let classesExtras = "";
-        // 🔥 ALTERAÇÃO AQUI: Removemos o isAdmin. Agora o destaque pisca para todos!
         if (isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
         if (isAdmin && isTrigger) classesExtras += " trigger-cell";
@@ -372,235 +479,263 @@ function App() {
         <button className="btn-logout" onClick={fazerLogout}>SAIR DO SISTEMA</button>
       </div>
 
-      {isAdmin && (
-        <div className="top-section">
-          <aside className="col-ranking">
-            <h3 className="section-title">📊 TIMES % {nomeMercadoAtual}</h3>
-            <div className="list-container">
-              {rankingTimes.map((item, i) => (
-                <div key={i} className="rank-card"><span className="pos">{i + 1}º</span><span className="name">{item.time}</span><span className="perc">{item.porcentagem}%</span></div>
-              ))}
-            </div>
-          </aside>
+      <h2 className="main-logo" style={{textAlign: 'center', margin: '20px 0', fontSize: '26px'}}>TH JURUNAS <span>SYSTEM</span></h2>
 
-          <main className="col-center">
-            <h2 className="main-logo">TH JURUNAS <span>SYSTEM</span></h2>
-            
-            <div className="cadastro-card">
-              <label>NOME DA ESTRATÉGIA</label>
-              <input className="flet-input" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Gatilho Ambas" />
-              <label className="mt-20">SEQUÊNCIA DE GATILHO (+2.5, 0-1, AMBAS)</label>
-              <div className="input-row">
-                <input className="flet-input" value={inputValor} onChange={(e) => setInputValor(e.target.value)} placeholder="Ex: +1.5, 0-0, +1.5" />
-                <button className="btn-flet-add" onClick={adicionarBloco}>+</button>
+      {/* 🔥 MENU DE GAVETAS DINÂMICO */}
+      {showMenuTop && (
+        <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 15px auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            {canViewBacktest && <button onClick={() => setAbaAtual(abaAtual === 'BACKTEST' ? null : 'BACKTEST')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'BACKTEST' ? '#ffcc00' : '#111', color: abaAtual === 'BACKTEST' ? '#000' : '#ffcc00', border: '1px solid #ffcc00', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>🧪 BACKTEST</button>}
+            {canViewGatilhos && <button onClick={() => setAbaAtual(abaAtual === 'GATILHOS' ? null : 'GATILHOS')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'GATILHOS' ? '#9FC131' : '#111', color: abaAtual === 'GATILHOS' ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>🎯 GATILHOS</button>}
+            {canViewIA && <button onClick={() => setAbaAtual(abaAtual === 'IA' ? null : 'IA')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'IA' ? '#00f2fe' : '#111', color: abaAtual === 'IA' ? '#000' : '#00f2fe', border: '1px solid #00f2fe', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>🤖 RADAR I.A.</button>}
+            {canViewClientes && <button onClick={() => setAbaAtual(abaAtual === 'CLIENTES' ? null : 'CLIENTES')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'CLIENTES' ? '#ff4444' : '#111', color: abaAtual === 'CLIENTES' ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>👥 CLIENTES</button>}
+          </div>
+
+          {/* GAVETA: BACKTEST */}
+          {abaAtual === 'BACKTEST' && canViewBacktest && (
+            <div className="cadastro-card" style={{border: '1px solid #ffcc00', background: 'rgba(255, 204, 0, 0.05)', marginTop: '15px', animation: 'fadeIn 0.3s ease'}}>
+              <h3 className="section-title" style={{marginBottom: '10px', color: '#ffcc00'}}>🧪 LABORATÓRIO DE BACKTEST (3 TIROS AO VIVO)</h3>
+              <div style={{fontSize: '12px', color: '#ccc', marginBottom: '15px'}}>A ferramenta vai calcular se, <strong>nos 3 jogos seguintes imediatos</strong> após o gatilho, nós teríamos obtido pelo menos 1 Green.</div>
+              <div style={{display: 'flex', gap: '10px', marginBottom: '15px'}}>
+                <select className="flet-input" style={{flex: '1'}} value={backtestLiga} onChange={(e) => setBacktestLiga(e.target.value)}>
+                  <option value="Todas">Todas as Ligas</option>
+                  <option value="Copa">Copa</option>
+                  <option value="Euro">Euro</option>
+                  <option value="Premier">Premier</option>
+                  <option value="Sul-Americana">Sul-Americana</option>
+                </select>
+                <input className="flet-input" style={{flex: '2'}} placeholder="Ex: 0-0, 1-1" value={backtestInput} onChange={(e) => setBacktestInput(e.target.value)} />
               </div>
-              <div className="preview-timeline">{sequencia.map((s) => <div key={s.id} className="mini-flet-box" onClick={() => setSequencia(sequencia.filter(x => x.id !== s.id))}>{s.valor}</div>)}</div>
-              <button className="btn-flet-save" style={{marginTop: '15px'}} onClick={salvarDados}>ATIVAR NOVO GATILHO</button>
+              <button className="btn-flet-save" style={{background: '#ffcc00', color: '#000', width: '100%'}} onClick={executarBacktest} disabled={carregandoBacktest}>{carregandoBacktest ? "⏳ CALCULANDO..." : "🔍 TESTAR ESTATÍSTICA"}</button>
+              {resultadoBacktest && !resultadoBacktest.erro && (
+                <div style={{marginTop: '15px', background: '#111', padding: '15px', borderRadius: '8px', borderLeft: `4px solid ${resultadoBacktest.assertividade >= 70 ? '#9FC131' : '#ff4444'}`}}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '10px'}}><span style={{color: '#fff', fontWeight: 'bold'}}>Resultado:</span><span style={{color: resultadoBacktest.assertividade >= 70 ? '#9FC131' : '#ff4444', fontWeight: 'bold', fontSize: '18px'}}>{resultadoBacktest.assertividade}% Win Rate</span></div>
+                  <div style={{fontSize: '12px', color: '#ccc', lineHeight: '1.6'}}>A sequência <strong style={{color: '#ffcc00'}}>[{backtestInput.toUpperCase()}]</strong> apareceu <strong>{resultadoBacktest.tentativas} vezes</strong>.<br/>Nós pegamos o Green em <strong>{resultadoBacktest.greens} ocasiões</strong> (com até 3 tiros).</div>
+                </div>
+              )}
             </div>
+          )}
 
-            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)'}}>
+          {/* GAVETA: GATILHOS */}
+          {abaAtual === 'GATILHOS' && canViewGatilhos && (
+            <div style={{animation: 'fadeIn 0.3s ease'}}>
+              <div className="cadastro-card" style={{marginTop: '15px'}}>
+                <label>NOME DA ESTRATÉGIA</label>
+                <input className="flet-input" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Gatilho Ambas" />
+                <label className="mt-20">SEQUÊNCIA DE GATILHO (+2.5, 0-1, AMBAS)</label>
+                <div className="input-row">
+                  <input className="flet-input" value={inputValor} onChange={(e) => setInputValor(e.target.value)} placeholder="Ex: +1.5, 0-0, +1.5" />
+                  <button className="btn-flet-add" onClick={adicionarBloco}>+</button>
+                </div>
+                <div className="preview-timeline">{sequencia.map((s) => <div key={s.id} className="mini-flet-box" onClick={() => setSequencia(sequencia.filter(x => x.id !== s.id))}>{s.valor}</div>)}</div>
+                <button className="btn-flet-save" style={{marginTop: '15px'}} onClick={salvarDados}>ATIVAR NOVO GATILHO</button>
+              </div>
+              <div className="active-strategies" style={{marginTop: '15px'}}>
+                <h3 className="section-title">GATILHOS ATIVOS NO SERVIDOR</h3>
+                {estrategias.map(est => {
+                  let padraoVisual = [];
+                  try { padraoVisual = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } catch(e) { padraoVisual = []; }
+                  return (
+                    <div key={est.id} className="mini-est-card" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                      <div><strong>{est.nome}</strong><div className="steps-row" style={{display: 'flex', gap: '4px', marginTop: '5px'}}>{padraoVisual?.map((p, i) => <span key={i} className="mini-flet-box" style={{padding: '2px 5px', fontSize: '10px'}}>{p.valor}</span>)}</div></div>
+                      <button onClick={() => deletarEstrategia(est.id)} style={{background: 'transparent', border: '1px solid #ff4444', color: '#ff4444', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px'}}>EXCLUIR</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* GAVETA: RADAR I.A. */}
+          {abaAtual === 'IA' && canViewIA && (
+            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#00f2fe'}}>🤖 RADAR I.A. (PADRÕES OURO)</h3>
-              <div style={{fontSize: '12px', color: '#ccc', marginBottom: '15px'}}>
-                A Inteligência Artificial analisa o histórico absoluto de jogos e sugere padrões com alta assertividade:
-              </div>
-              
+              <div style={{fontSize: '12px', color: '#ccc', marginBottom: '15px'}}>A Inteligência Artificial analisa o histórico absoluto de jogos e sugere padrões com alta assertividade:</div>
               {dicasIA.length === 0 ? (
                 <div style={{color: '#888', fontSize: '13px', textAlign: 'center'}}>Nenhum padrão forte encontrado hoje ainda.</div>
               ) : (
                 <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
                   {dicasIA.map((dica, idx) => (
                     <div key={idx} className="ia-dica-card" style={{background: '#1a1a1a', padding: '10px', borderRadius: '8px', borderLeft: '3px solid #00f2fe'}}>
-                      <div style={{display: 'flex', justifyContent: 'space-between'}}>
-                        <span style={{fontWeight: 'bold', color: '#ffcc00'}}>{dica.liga}</span>
-                        <span style={{color: '#9FC131', fontWeight: 'bold'}}>{dica.assertividade}% Win Rate</span>
-                      </div>
-                      <div style={{marginTop: '8px', display: 'flex', gap: '5px', flexWrap: 'wrap'}}>
-                         {dica.padrao.map((p, pIdx) => <span key={pIdx} className="mini-flet-box">{p.valor}</span>)}
-                      </div>
+                      <div style={{display: 'flex', justifyContent: 'space-between'}}><span style={{fontWeight: 'bold', color: '#ffcc00'}}>{dica.liga}</span><span style={{color: '#9FC131', fontWeight: 'bold'}}>{dica.assertividade}% Win Rate</span></div>
+                      <div style={{marginTop: '8px', display: 'flex', gap: '5px', flexWrap: 'wrap'}}>{dica.padrao.map((p, pIdx) => <span key={pIdx} className="mini-flet-box">{p.valor}</span>)}</div>
                       <div style={{fontSize: '10px', color: '#888', marginTop: '5px'}}>Ocorreu {dica.amostras} vezes recentemente.</div>
-                      <button className="btn-flet-save" style={{marginTop: '10px', padding: '5px 10px', fontSize: '11px', background: '#00f2fe', color: '#000', width: '100%'}} onClick={() => copiarDicaIA(dica)}>
-                        ⚡ COPIAR E ATIVAR GATILHO
-                      </button>
+                      {isAdmin && (
+                        <button className="btn-flet-save" style={{marginTop: '10px', padding: '5px 10px', fontSize: '11px', background: '#00f2fe', color: '#000', width: '100%'}} onClick={() => copiarDicaIA(dica)}>⚡ COPIAR E ATIVAR GATILHO</button>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
             </div>
+          )}
 
-            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)'}}>
-              <h3 className="section-title" style={{marginBottom: '10px', color: '#9FC131'}}>👥 CADASTRAR NOVO CLIENTE</h3>
-              <div className="input-row">
+          {/* GAVETA: CLIENTES */}
+          {abaAtual === 'CLIENTES' && canViewClientes && (
+            <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)', animation: 'fadeIn 0.3s ease'}}>
+              <h3 className="section-title" style={{marginBottom: '10px', color: '#ff4444'}}>👥 CADASTRAR NOVO CLIENTE</h3>
+              <div className="input-row" style={{marginBottom: '20px'}}>
                 <input className="flet-input" value={novoUserEmail} onChange={(e) => setNovoUserEmail(e.target.value)} placeholder="Usuário" />
                 <input className="flet-input" type="password" value={novoUserSenha} onChange={(e) => setNovoUserSenha(e.target.value)} placeholder="Senha" />
                 <button className="btn-flet-save" style={{padding: '0 15px', width: 'auto'}} onClick={cadastrarCliente}>SALVAR</button>
               </div>
-            </div>
 
-            <div className="active-strategies">
-              <h3 className="section-title" style={{marginTop: '20px'}}>GATILHOS ATIVOS NO SERVIDOR</h3>
-              {estrategias.map(est => {
-                let padraoVisual = [];
-                try { padraoVisual = typeof est.padrao_visual === 'string' ? JSON.parse(est.padrao_visual) : est.padrao_visual; } catch(e) { padraoVisual = []; }
-                return (
-                  <div key={est.id} className="mini-est-card" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <div><strong>{est.nome}</strong><div className="steps-row" style={{display: 'flex', gap: '4px', marginTop: '5px'}}>{padraoVisual?.map((p, i) => <span key={i} className="mini-flet-box" style={{padding: '2px 5px', fontSize: '10px'}}>{p.valor}</span>)}</div></div>
-                    <button onClick={() => deletarEstrategia(est.id)} style={{background: 'transparent', border: '1px solid #ff4444', color: '#ff4444', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px'}}>EXCLUIR</button>
+              <h3 className="section-title" style={{marginBottom: '10px', color: '#9FC131', marginTop: '20px', borderTop: '1px solid #333', paddingTop: '20px'}}>⚙️ GERENCIAR ACESSOS VIP</h3>
+              <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                {listaClientes.map(cliente => (
+                  <div key={cliente.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1a1a1a', padding: '10px', borderRadius: '8px', borderLeft: '3px solid #333'}}>
+                    <span style={{color: '#fff', fontSize: '13px', fontWeight: 'bold'}}>{cliente.email}</span>
+                    <div style={{display: 'flex', gap: '8px'}}>
+                      <button 
+                        onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)}
+                        style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}
+                      >
+                        {cliente.acesso_backtest ? '🧪 B-TEST: ON' : '🧪 B-TEST: OFF'}
+                      </button>
+                      <button 
+                        onClick={() => togglePermissao(cliente.id, 'acesso_ia', cliente.acesso_ia)}
+                        style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_ia ? '#00f2fe' : '#333', color: cliente.acesso_ia ? '#000' : '#888'}}
+                      >
+                        {cliente.acesso_ia ? '🤖 I.A: ON' : '🤖 I.A: OFF'}
+                      </button>
+                    </div>
                   </div>
-                );
-              })}
+                ))}
+                {listaClientes.length === 0 && <div style={{color: '#888', fontSize: '12px', textAlign: 'center'}}>Nenhum cliente cadastrado.</div>}
+              </div>
             </div>
-          </main>
-
-          <aside className="col-maximas">
-            <h3 className="section-title">⚠️ MÁXIMAS S/ {nomeMercadoAtual}</h3>
-            <div className="list-container">
-              {estatisticasComp.map((comp, i) => (
-                <div key={i} className="maxima-item"><span className="m-label">{comp.liga}</span><div className="m-value-box"><span className="m-num">{comp.jogos_sem_ambas}</span><span className="m-text">JOGOS SEGUIDOS</span></div></div>
-              ))}
-            </div>
-          </aside>
+          )}
         </div>
       )}
 
-      <div className="bottom-section" style={!isAdmin ? {marginTop: '20px'} : {}}>
-        {!isAdmin && <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '20px', fontSize: '24px'}}>TH JURUNAS <span>SYSTEM</span></h2>}
+      {/* 🔥 MENU DO USUÁRIO GERAL (RANKING E MÁXIMAS - AGORA VISÍVEL PRA TODO MUNDO) */}
+      <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+          <button onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }} style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}>
+            🏆 RANKING TIMES
+          </button>
+          <button onClick={() => { setMostrarMaximasMobile(!mostrarMaximasMobile); setMostrarRankingMobile(false); }} style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarMaximasMobile ? '#ff4444' : '#111', color: mostrarMaximasMobile ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}>
+            ⚠️ MÁXIMAS (RED)
+          </button>
+        </div>
 
-        {/* 🔥 MENU SANFONA: VISÃO DO CLIENTE PARA ESTUDAR O MERCADO */}
-        {!isAdmin && (
-          <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }}
-                style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}
-              >
-                🏆 RANKING TIMES
-              </button>
-              <button
-                 onClick={() => { setMostrarMaximasMobile(!mostrarMaximasMobile); setMostrarRankingMobile(false); }}
-                 style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarMaximasMobile ? '#ff4444' : '#111', color: mostrarMaximasMobile ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}
-              >
-                ⚠️ MÁXIMAS (RED)
-              </button>
+        {mostrarRankingMobile && (
+          <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
+            <h3 style={{ color: '#9FC131', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>📊 TOP 10 TIMES - {nomeMercadoAtual}</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+              {rankingTimes.map((item, i) => (
+                <div key={i} style={{ background: '#222', padding: '10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                  <span style={{ color: '#888', fontWeight: 'bold' }}>{i + 1}º</span>
+                  <span style={{ color: '#fff', fontWeight: 'bold' }}>{item.time}</span>
+                  <span style={{ color: '#9FC131', fontWeight: 'bold' }}>{item.porcentagem}%</span>
+                </div>
+              ))}
             </div>
-
-            {mostrarRankingMobile && (
-              <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
-                <h3 style={{ color: '#9FC131', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>📊 TOP 10 TIMES - {nomeMercadoAtual}</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
-                  {rankingTimes.map((item, i) => (
-                    <div key={i} style={{ background: '#222', padding: '10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                      <span style={{ color: '#888', fontWeight: 'bold' }}>{i + 1}º</span>
-                      <span style={{ color: '#fff', fontWeight: 'bold' }}>{item.time}</span>
-                      <span style={{ color: '#9FC131', fontWeight: 'bold' }}>{item.porcentagem}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {mostrarMaximasMobile && (
-              <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
-                <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>⚠️ LIGAS COM MAIOR JEJUM S/ {nomeMercadoAtual}</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
-                  {estatisticasComp.map((comp, i) => (
-                    <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '12px' }}>
-                      <span style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{comp.liga}</span>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
-                        <span style={{ color: '#ff4444', fontSize: '20px', fontWeight: 'bold' }}>{comp.jogos_sem_ambas}</span>
-                        <span style={{ color: '#888', fontSize: '10px' }}>JOGOS SEGUIDOS</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div className="league-tabs" style={{ marginBottom: 0 }}>
-            {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
+        {mostrarMaximasMobile && (
+          <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
+            <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>⚠️ LIGAS COM MAIOR JEJUM S/ {nomeMercadoAtual}</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+              {estatisticasComp.map((comp, i) => (
+                <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '12px' }}>
+                  <span style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{comp.liga}</span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
+                    <span style={{ color: '#ff4444', fontSize: '20px', fontWeight: 'bold' }}>{comp.jogos_sem_ambas}</span>
+                    <span style={{ color: '#888', fontSize: '10px' }}>JOGOS SEGUIDOS</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#888' }}>MERCADO:</span>
-            <select 
-              className="flet-input" 
-              style={{ width: 'auto', padding: '8px 15px', borderRadius: '8px', border: '1px solid #9FC131', color: '#9FC131', fontWeight: 'bold', cursor: 'pointer' }}
-              value={mercadoAtivo}
-              onChange={(e) => setMercadoAtivo(e.target.value)}
-            >
-              {mercadosDrop.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-            </select>
+        )}
+      </div>
+
+      {/* 🔥 ÁREA DO RADAR (SEMPRE VISÍVEL E LIMPA) */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="league-tabs" style={{ marginBottom: 0 }}>
+          {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#888' }}>MERCADO:</span>
+          <select 
+            className="flet-input" 
+            style={{ width: 'auto', padding: '8px 15px', borderRadius: '8px', border: '1px solid #9FC131', color: '#9FC131', fontWeight: 'bold', cursor: 'pointer' }}
+            value={mercadoAtivo}
+            onChange={(e) => setMercadoAtivo(e.target.value)}
+          >
+            {mercadosDrop.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="matriz-container">
+        <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3>
+            📡 RADAR - {ligaSelecionada.toUpperCase()}
+            {isAdmin && sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
+          </h3>
+          <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+            {ultimaAtualizacao && <span style={{fontSize: '11px', color: '#888'}}>Atualizado às {ultimaAtualizacao}</span>}
+            {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
           </div>
         </div>
 
-        <div className="matriz-container">
-          <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3>
-              📡 RADAR - {ligaSelecionada.toUpperCase()}
-              {isAdmin && sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
-            </h3>
-            <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
-              {ultimaAtualizacao && <span style={{fontSize: '11px', color: '#888'}}>Atualizado às {ultimaAtualizacao}</span>}
-              {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
-            </div>
-          </div>
-
-          <div className="grid-matriz-wrapper">
-            <div className="grid-matriz">
-              
-              <div style={{display: 'contents'}}>
-                <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
-                {minutosCols.map(min => {
-                  const s = statsPorMinuto[min];
-                  const corPerc = s.perc >= 50 ? '#9FC131' : '#ff4444'; 
-                  return (
-                    <div key={`stat-${min}`} className="grid-cell top-stat-cell">
-                      <span style={{color: '#ffcc00', fontWeight: 'bold', fontSize: '11px', lineHeight: '1'}}>{s.greens}</span>
-                      <span style={{color: corPerc, fontSize: '9px', lineHeight: '1', marginTop: '2px'}}>{s.perc}%</span>
-                    </div>
-                  );
-                })}
-                <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
-                <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
-              </div>
-
-              <div className="grid-cell header-cell">H/M</div>
-              {minutosCols.map(min => <div key={`h-${min}`} className="grid-cell header-cell">{min}</div>)}
-              <div className="grid-cell header-cell" style={{fontSize: '11px'}}>Dados</div>
-              <div className="grid-cell header-cell" style={{fontSize: '14px'}}>⚽</div>
-
-              {horasParaMostrar.map(hora => {
-                let totalValidosRow = 0; let totalGreensRow = 0; let totalGolsRow = 0;
-                const linhaDados = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
-                if (linhaDados && linhaDados.resultados) {
-                  Object.values(linhaDados.resultados).forEach(jogo => {
-                    if (jogo.placar !== "-" && jogo.placar) {
-                      totalValidosRow++;
-                      if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
-                      const pParts = String(jogo.placar).split("-");
-                      if (pParts.length === 2) {
-                        const c = parseInt(pParts[0].trim(), 10);
-                        const f = parseInt(pParts[1].trim(), 10);
-                        if (!isNaN(c) && !isNaN(f)) totalGolsRow += (c + f);
-                      }
-                    }
-                  });
-                }
-                const percRow = totalValidosRow > 0 ? Math.round((totalGreensRow / totalValidosRow) * 100) : 0;
-                const corPercRow = percRow >= 50 ? '#9FC131' : '#ff4444';
-
+        <div className="grid-matriz-wrapper">
+          <div className="grid-matriz">
+            
+            <div style={{display: 'contents'}}>
+              <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
+              {minutosCols.map(min => {
+                const s = statsPorMinuto[min];
+                const corPerc = s.perc >= 50 ? '#9FC131' : '#ff4444'; 
                 return (
-                  <div style={{display: 'contents'}} key={`row-${hora}`}>
-                    <div className="grid-cell hour-cell">{hora}h</div>
-                    {minutosCols.map(min => renderCell(hora, min))}
-                    <div className="grid-cell side-stat-cell" style={{ color: corPercRow }}>({percRow}%)</div>
-                    <div className="grid-cell side-stat-cell" style={{color: '#fff'}}>{totalGolsRow}</div>
+                  <div key={`stat-${min}`} className="grid-cell top-stat-cell">
+                    <span style={{color: '#ffcc00', fontWeight: 'bold', fontSize: '11px', lineHeight: '1'}}>{s.greens}</span>
+                    <span style={{color: corPerc, fontSize: '9px', lineHeight: '1', marginTop: '2px'}}>{s.perc}%</span>
                   </div>
                 );
               })}
+              <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
+              <div className="grid-cell empty-cell" style={{ border: 'none', background: 'transparent' }}></div>
             </div>
+
+            <div className="grid-cell header-cell">H/M</div>
+            {minutosCols.map(min => <div key={`h-${min}`} className="grid-cell header-cell">{min}</div>)}
+            <div className="grid-cell header-cell" style={{fontSize: '11px'}}>Dados</div>
+            <div className="grid-cell header-cell" style={{fontSize: '14px'}}>⚽</div>
+
+            {horasParaMostrar.map(hora => {
+              let totalValidosRow = 0; let totalGreensRow = 0; let totalGolsRow = 0;
+              const linhaDados = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
+              if (linhaDados && linhaDados.resultados) {
+                Object.values(linhaDados.resultados).forEach(jogo => {
+                  if (jogo.placar !== "-" && jogo.placar) {
+                    totalValidosRow++;
+                    if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
+                    const pParts = String(jogo.placar).split("-");
+                    if (pParts.length === 2) {
+                      const c = parseInt(pParts[0].trim(), 10);
+                      const f = parseInt(pParts[1].trim(), 10);
+                      if (!isNaN(c) && !isNaN(f)) totalGolsRow += (c + f);
+                    }
+                  }
+                });
+              }
+              const percRow = totalValidosRow > 0 ? Math.round((totalGreensRow / totalValidosRow) * 100) : 0;
+              const corPercRow = percRow >= 50 ? '#9FC131' : '#ff4444';
+
+              return (
+                <div style={{display: 'contents'}} key={`row-${hora}`}>
+                  <div className="grid-cell hour-cell">{hora}h</div>
+                  {minutosCols.map(min => renderCell(hora, min))}
+                  <div className="grid-cell side-stat-cell" style={{ color: corPercRow }}>({percRow}%)</div>
+                  <div className="grid-cell side-stat-cell" style={{color: '#fff'}}>{totalGolsRow}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
