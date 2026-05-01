@@ -16,8 +16,6 @@ function App() {
   const [estatisticasComp, setEstatisticasComp] = useState([]);
   const [matrizJogos, setMatrizJogos] = useState([]);
   const [sinaisAtivos, setSinaisAtivos] = useState([]);
-  
-  // 🔥 NOVO: Estado para guardar as dicas da Inteligência Artificial
   const [dicasIA, setDicasIA] = useState([]);
   
   const [nome, setNome] = useState('');
@@ -27,6 +25,10 @@ function App() {
   const [ligaSelecionada, setLigaSelecionada] = useState('Copa');
   const [placarFiltro, setPlacarFiltro] = useState(null); 
   const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
+
+  // 🔥 ESTADOS PARA OS MENUS SANFONA DO USUÁRIO MOBILE
+  const [mostrarRankingMobile, setMostrarRankingMobile] = useState(false);
+  const [mostrarMaximasMobile, setMostrarMaximasMobile] = useState(false);
 
   const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
   const [erroDB, setErroDB] = useState('');
@@ -85,7 +87,6 @@ function App() {
     const { data: est } = await supabase.from('estrategias').select('*').order('created_at', { ascending: false });
     if (est) setEstrategias([...est]);
 
-    // 🔥 NOVO: Busca as dicas fresquinhas da IA
     const { data: iaData } = await supabase.from('dicas_ia').select('*').order('assertividade', { ascending: false });
     if (iaData) setDicasIA([...iaData]);
 
@@ -246,11 +247,10 @@ function App() {
     else { setNome(''); setSequencia([]); buscarDados(); window.scrollTo(0, 0); }
   };
 
-  // 🔥 NOVO: Função que o botão "Copiar Gatilho" chama
   const copiarDicaIA = (dica) => {
     setNome(`🎯 Auto I.A: ${dica.liga}`);
     setSequencia(dica.padrao);
-    window.scrollTo({ top: 0, behavior: 'smooth' }); // Sobe a tela para o admin salvar
+    window.scrollTo({ top: 0, behavior: 'smooth' }); 
   };
 
   if (!usuarioLogado) {
@@ -346,7 +346,8 @@ function App() {
         const corDefinitiva = calcularCorDinamica(res.placar, mercadoAtivo);
 
         let classesExtras = "";
-        if (isAdmin && isMaxima) classesExtras += " blink-maxima";
+        // 🔥 ALTERAÇÃO AQUI: Removemos o isAdmin. Agora o destaque pisca para todos!
+        if (isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
         if (isAdmin && isTrigger) classesExtras += " trigger-cell";
         if (isAdmin && isTarget) classesExtras += " target-cell";
@@ -397,11 +398,10 @@ function App() {
               <button className="btn-flet-save" style={{marginTop: '15px'}} onClick={salvarDados}>ATIVAR NOVO GATILHO</button>
             </div>
 
-            {/* 🔥 NOVO BLOCO: RADAR DA INTELIGÊNCIA ARTIFICIAL */}
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#00f2fe'}}>🤖 RADAR I.A. (PADRÕES OURO)</h3>
               <div style={{fontSize: '12px', color: '#ccc', marginBottom: '15px'}}>
-                A Inteligência Artificial analisa o histórico absoluto de jogos e sugere padrões com mais de 80% de assertividade:
+                A Inteligência Artificial analisa o histórico absoluto de jogos e sugere padrões com alta assertividade:
               </div>
               
               {dicasIA.length === 0 ? (
@@ -462,8 +462,60 @@ function App() {
         </div>
       )}
 
-      <div className="bottom-section" style={!isAdmin ? {marginTop: '50px'} : {}}>
-        {!isAdmin && <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px', fontSize: '28px'}}>TH JURUNAS <span>SYSTEM</span></h2>}
+      <div className="bottom-section" style={!isAdmin ? {marginTop: '20px'} : {}}>
+        {!isAdmin && <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '20px', fontSize: '24px'}}>TH JURUNAS <span>SYSTEM</span></h2>}
+
+        {/* 🔥 MENU SANFONA: VISÃO DO CLIENTE PARA ESTUDAR O MERCADO */}
+        {!isAdmin && (
+          <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }}
+                style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}
+              >
+                🏆 RANKING TIMES
+              </button>
+              <button
+                 onClick={() => { setMostrarMaximasMobile(!mostrarMaximasMobile); setMostrarRankingMobile(false); }}
+                 style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarMaximasMobile ? '#ff4444' : '#111', color: mostrarMaximasMobile ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}
+              >
+                ⚠️ MÁXIMAS (RED)
+              </button>
+            </div>
+
+            {mostrarRankingMobile && (
+              <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
+                <h3 style={{ color: '#9FC131', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>📊 TOP 10 TIMES - {nomeMercadoAtual}</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+                  {rankingTimes.map((item, i) => (
+                    <div key={i} style={{ background: '#222', padding: '10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                      <span style={{ color: '#888', fontWeight: 'bold' }}>{i + 1}º</span>
+                      <span style={{ color: '#fff', fontWeight: 'bold' }}>{item.time}</span>
+                      <span style={{ color: '#9FC131', fontWeight: 'bold' }}>{item.porcentagem}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {mostrarMaximasMobile && (
+              <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
+                <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>⚠️ LIGAS COM MAIOR JEJUM S/ {nomeMercadoAtual}</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+                  {estatisticasComp.map((comp, i) => (
+                    <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '12px' }}>
+                      <span style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{comp.liga}</span>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
+                        <span style={{ color: '#ff4444', fontSize: '20px', fontWeight: 'bold' }}>{comp.jogos_sem_ambas}</span>
+                        <span style={{ color: '#888', fontSize: '10px' }}>JOGOS SEGUIDOS</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div className="league-tabs" style={{ marginBottom: 0 }}>
