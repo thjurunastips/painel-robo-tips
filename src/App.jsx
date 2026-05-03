@@ -79,6 +79,7 @@ function App() {
     else buscarDados(); 
   };
 
+  // Retornamos à função de ordenação original que funciona perfeitamente para o design
   const sortHoursDescending = (horasArray) => {
     return horasArray.sort((a, b) => {
       let diff = b - a;
@@ -212,22 +213,22 @@ function App() {
     ligasUnicas.forEach(ligaNome => {
       const linhasDessaLiga = dadosMatriz.filter(m => m.liga === ligaNome);
       
-      // 🔥 CORREÇÃO: Garante que só puxa a linha mais recente de cada hora, ignorando fantasmas do dia anterior
-      const horasUnicasParaProcessar = [...new Set(linhasDessaLiga.map(m => Number(m.hora)))];
-      
-      let flatJogos = [];
-      horasUnicasParaProcessar.forEach(h => {
-        const linha = linhasDessaLiga.find(m => Number(m.hora) === h);
-        if (!linha || !linha.resultados) return;
-        Object.keys(linha.resultados).forEach(min => {
-          const jogo = linha.resultados[min];
-          flatJogos.push({ hora: Number(linha.hora), min: Number(min), placar: jogo.placar, corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
-        });
-      });
-
-      const horasDesc = sortHoursDescending([...horasUnicasParaProcessar]);
+      const horasUnicas = [...new Set(linhasDessaLiga.map(j => j.hora))];
+      const horasDesc = sortHoursDescending(horasUnicas);
       const hourAge = {};
       horasDesc.forEach((h, idx) => hourAge[h] = idx);
+
+      let flatJogos = [];
+      horasDesc.forEach(h => {
+        // 🔥 A SOLUÇÃO: Usamos o .find para pegar EXATAMENTE a mesma linha que o Radar usa, ignorando duplicações antigas
+        const linha = linhasDessaLiga.find(m => m.hora === h);
+        if (linha && linha.resultados) {
+          Object.keys(linha.resultados).forEach(min => {
+            const jogo = linha.resultados[min];
+            flatJogos.push({ hora: Number(linha.hora), min: Number(min), placar: jogo.placar, corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
+          });
+        }
+      });
 
       flatJogos.sort((a, b) => {
         if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[b.hora] - hourAge[a.hora]; 
@@ -254,6 +255,7 @@ function App() {
               minsGatilho.push(janela[j].min);
               jogosGat.push({ hora: janela[j].hora, min: janela[j].min });
             }
+            // Retornado à lógica original de alvos que funcionava perfeitamente
             if (match) {
               let horaUltimoJogo = janela[tamanho - 1].hora;
               let horaAlvo = horaUltimoJogo + 1;
@@ -265,7 +267,7 @@ function App() {
       });
 
       let maxStreak = 0; let currentStreak = 0;
-      // 🔥 CORREÇÃO: Conta apenas placares válidos que contêm números (ignora interrogações e tracinhos)
+      // Conta o Jejum ignorando vazios (?) usando a regex \d (deve conter número)
       flatJogos.filter(j => j.placar && /\d/.test(j.placar)).forEach(jogo => {
         if (jogo.corDinamica === 'bg-red') { 
             currentStreak++; 
@@ -281,6 +283,7 @@ function App() {
       }
     });
 
+    // Retornado à lógica original de limpeza de duplicatas para não sujar a tela
     const sinaisUnicos = alertasGerados.filter((v, i, a) => a.findIndex(t => (t.liga === v.liga && t.horaAlvo === v.horaAlvo && JSON.stringify(t.minutosAlvo) === JSON.stringify(v.minutosAlvo))) === i);
 
     setSinaisAtivos(sinaisUnicos);
@@ -441,8 +444,8 @@ function App() {
   const hourAgeLocal = {}; horasDescLocal.forEach((h, idx) => hourAgeLocal[h] = idx);
   
   let todosJogosRadar = [];
-  // 🔥 CORREÇÃO: Garante que o Radar também não sofra com horas duplicadas
   horasDescLocal.forEach(h => {
+    // Mesma trava de segurança aqui para não contar duplicações da matriz
     const linha = linhasDaLiga.find(m => Number(m.hora) === h);
     if(linha && linha.resultados) {
       Object.keys(linha.resultados).forEach(min => {
@@ -468,7 +471,6 @@ function App() {
   const statsPorMinuto = {};
   minutosCols.forEach(min => {
     let totalValidos = 0; let totalGreens = 0;
-    // 🔥 CORREÇÃO: Usa apenas a linha mais recente por hora para estatísticas laterais e superiores
     horasDescLocal.forEach(h => {
       const linha = linhasDaLiga.find(m => Number(m.hora) === h);
       if (linha && linha.resultados && linha.resultados[String(min)]) {
