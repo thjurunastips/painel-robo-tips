@@ -187,7 +187,7 @@ function App() {
     dadosFiltradosParaRanking.forEach(linha => {
       if (linha.resultados) {
         Object.values(linha.resultados).forEach(jogo => {
-          if (jogo.home && jogo.away && jogo.placar !== "-") {
+          if (jogo.home && jogo.away && jogo.placar && /\d/.test(jogo.placar)) {
             if (!timesStats[jogo.home]) timesStats[jogo.home] = { jogos: 0, hits: 0 };
             if (!timesStats[jogo.away]) timesStats[jogo.away] = { jogos: 0, hits: 0 };
             timesStats[jogo.home].jogos += 1;
@@ -211,17 +211,21 @@ function App() {
     let alertasGerados = [];
     ligasUnicas.forEach(ligaNome => {
       const linhasDessaLiga = dadosMatriz.filter(m => m.liga === ligaNome);
+      
+      // 🔥 CORREÇÃO: Garante que só puxa a linha mais recente de cada hora, ignorando fantasmas do dia anterior
+      const horasUnicasParaProcessar = [...new Set(linhasDessaLiga.map(m => Number(m.hora)))];
+      
       let flatJogos = [];
-      linhasDessaLiga.forEach(linha => {
-        if (!linha.resultados) return;
+      horasUnicasParaProcessar.forEach(h => {
+        const linha = linhasDessaLiga.find(m => Number(m.hora) === h);
+        if (!linha || !linha.resultados) return;
         Object.keys(linha.resultados).forEach(min => {
           const jogo = linha.resultados[min];
           flatJogos.push({ hora: Number(linha.hora), min: Number(min), placar: jogo.placar, corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
         });
       });
 
-      const horasUnicas = [...new Set(flatJogos.map(j => j.hora))];
-      const horasDesc = sortHoursDescending(horasUnicas);
+      const horasDesc = sortHoursDescending([...horasUnicasParaProcessar]);
       const hourAge = {};
       horasDesc.forEach((h, idx) => hourAge[h] = idx);
 
@@ -240,7 +244,7 @@ function App() {
         if (flatJogos.length >= tamanho) {
           for (let i = 0; i <= flatJogos.length - tamanho; i++) {
             let janela = flatJogos.slice(i, i + tamanho);
-            if (janela.some(j => j.placar === "-")) continue;
+            if (janela.some(j => !j.placar || j.placar === "-")) continue;
 
             let match = true;
             let minsGatilho = [];
@@ -261,7 +265,8 @@ function App() {
       });
 
       let maxStreak = 0; let currentStreak = 0;
-      flatJogos.filter(j => j.placar !== "-").forEach(jogo => {
+      // 🔥 CORREÇÃO: Conta apenas placares válidos que contêm números (ignora interrogações e tracinhos)
+      flatJogos.filter(j => j.placar && /\d/.test(j.placar)).forEach(jogo => {
         if (jogo.corDinamica === 'bg-red') { 
             currentStreak++; 
             if (currentStreak > maxStreak) maxStreak = currentStreak; 
@@ -436,11 +441,15 @@ function App() {
   const hourAgeLocal = {}; horasDescLocal.forEach((h, idx) => hourAgeLocal[h] = idx);
   
   let todosJogosRadar = [];
-  linhasDaLiga.forEach(linha => {
-    if(linha.resultados) {
+  // 🔥 CORREÇÃO: Garante que o Radar também não sofra com horas duplicadas
+  horasDescLocal.forEach(h => {
+    const linha = linhasDaLiga.find(m => Number(m.hora) === h);
+    if(linha && linha.resultados) {
       Object.keys(linha.resultados).forEach(min => {
         const jogo = linha.resultados[min];
-        if (jogo.placar !== "-") todosJogosRadar.push({ hora: Number(linha.hora), min: Number(min), corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
+        if (jogo.placar && /\d/.test(jogo.placar)) {
+           todosJogosRadar.push({ hora: Number(linha.hora), min: Number(min), corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
+        }
       });
     }
   });
@@ -459,10 +468,12 @@ function App() {
   const statsPorMinuto = {};
   minutosCols.forEach(min => {
     let totalValidos = 0; let totalGreens = 0;
-    linhasDaLiga.forEach(linha => {
-      if (linha.resultados && linha.resultados[String(min)]) {
+    // 🔥 CORREÇÃO: Usa apenas a linha mais recente por hora para estatísticas laterais e superiores
+    horasDescLocal.forEach(h => {
+      const linha = linhasDaLiga.find(m => Number(m.hora) === h);
+      if (linha && linha.resultados && linha.resultados[String(min)]) {
         const jogo = linha.resultados[String(min)];
-        if (jogo.placar !== "-") {
+        if (jogo.placar && /\d/.test(jogo.placar)) {
           totalValidos++;
           if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreens++;
         }
@@ -654,7 +665,6 @@ function App() {
           </div>
         )}
 
-        {/* 🔥 GAVETA DE MÁXIMAS AJUSTADA - FOCO NO JEJUM ATUAL */}
         {mostrarMaximasMobile && (
           <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
             <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>⚠️ MÁXIMA E JEJUM ATUAL - {nomeMercadoAtual}</h3>
@@ -664,14 +674,10 @@ function App() {
                 return (
                   <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '12px', border: taNaMaxima ? '1px solid #ff4444' : 'none', boxShadow: taNaMaxima ? '0 0 10px rgba(255,68,68,0.2)' : 'none' }}>
                     <span style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{comp.liga}</span>
-                    
-                    {/* O Jejum Atual Gigante e Vermelho no centro */}
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
                       <span style={{ color: '#ff4444', fontSize: '24px', fontWeight: 'bold' }}>{comp.jejum_atual}</span>
                       <span style={{ color: '#888', fontSize: '10px' }}>JEJUM ATUAL</span>
                     </div>
-
-                    {/* A Máxima do Dia menorzinha como referência */}
                     <div style={{ fontSize: '11px', color: '#ccc', marginTop: '6px', background: '#1a1a1a', padding: '4px 8px', borderRadius: '4px', width: '100%', textAlign: 'center' }}>
                       Máxima do Dia: <strong style={{ color: '#fff', fontSize: '12px' }}>{comp.jogos_sem_ambas}</strong>
                     </div>
@@ -767,7 +773,7 @@ function App() {
               const linhaDados = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
               if (linhaDados && linhaDados.resultados) {
                 Object.values(linhaDados.resultados).forEach(jogo => {
-                  if (jogo.placar !== "-" && jogo.placar) {
+                  if (jogo.placar && /\d/.test(jogo.placar)) {
                     totalValidosRow++;
                     if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
                     const pParts = String(jogo.placar).split("-");
