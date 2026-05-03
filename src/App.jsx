@@ -248,7 +248,9 @@ function App() {
       maximasPorLiga.push({ liga: ligaNome, jogos_sem_ambas: maxStreak });
     });
 
-    setSinaisAtivos(alertasGerados);
+    const sinaisUnicos = alertasGerados.filter((v, i, a) => a.findIndex(t => (t.liga === v.liga && t.horaAlvo === v.horaAlvo && JSON.stringify(t.minutosAlvo) === JSON.stringify(v.minutosAlvo))) === i);
+
+    setSinaisAtivos(sinaisUnicos);
     setEstatisticasComp(maximasPorLiga);
   };
 
@@ -456,8 +458,10 @@ function App() {
         let classesExtras = "";
         if (isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
-        if (isAdmin && isTrigger) classesExtras += " trigger-cell";
-        if (isAdmin && isTarget) classesExtras += " target-cell";
+        
+        // 🔥 Sem a trava do isAdmin, a caixinha pisca no radar para todo mundo
+        if (isTrigger) classesExtras += " trigger-cell";
+        if (isTarget) classesExtras += " target-cell";
         
         return (
           <div key={chave} className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', lineHeight: '1.2' }}>
@@ -466,7 +470,8 @@ function App() {
         );
       }
     }
-    return <div key={chave} className={`grid-cell empty-cell ${isAdmin && isTarget ? 'target-cell' : ''}`}>-</div>;
+    // 🔥 Fallback da célula vazia também piscando para todo mundo
+    return <div key={chave} className={`grid-cell empty-cell ${isTarget ? 'target-cell' : ''}`}>-</div>;
   };
 
   const sinaisDessaLiga = sinaisAtivos.filter(s => s.liga === ligaSelecionada);
@@ -481,7 +486,6 @@ function App() {
 
       <h2 className="main-logo" style={{textAlign: 'center', margin: '20px 0', fontSize: '26px'}}>TH JURUNAS <span>SYSTEM</span></h2>
 
-      {/* 🔥 MENU DE GAVETAS DINÂMICO */}
       {showMenuTop && (
         <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 15px auto' }}>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -491,7 +495,6 @@ function App() {
             {canViewClientes && <button onClick={() => setAbaAtual(abaAtual === 'CLIENTES' ? null : 'CLIENTES')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'CLIENTES' ? '#ff4444' : '#111', color: abaAtual === 'CLIENTES' ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>👥 CLIENTES</button>}
           </div>
 
-          {/* GAVETA: BACKTEST */}
           {abaAtual === 'BACKTEST' && canViewBacktest && (
             <div className="cadastro-card" style={{border: '1px solid #ffcc00', background: 'rgba(255, 204, 0, 0.05)', marginTop: '15px', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ffcc00'}}>🧪 LABORATÓRIO DE BACKTEST (3 TIROS AO VIVO)</h3>
@@ -516,7 +519,6 @@ function App() {
             </div>
           )}
 
-          {/* GAVETA: GATILHOS */}
           {abaAtual === 'GATILHOS' && canViewGatilhos && (
             <div style={{animation: 'fadeIn 0.3s ease'}}>
               <div className="cadastro-card" style={{marginTop: '15px'}}>
@@ -546,7 +548,6 @@ function App() {
             </div>
           )}
 
-          {/* GAVETA: RADAR I.A. */}
           {abaAtual === 'IA' && canViewIA && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#00f2fe'}}>🤖 RADAR I.A. (PADRÕES OURO)</h3>
@@ -570,7 +571,6 @@ function App() {
             </div>
           )}
 
-          {/* GAVETA: CLIENTES */}
           {abaAtual === 'CLIENTES' && canViewClientes && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ff4444'}}>👥 CADASTRAR NOVO CLIENTE</h3>
@@ -586,16 +586,10 @@ function App() {
                   <div key={cliente.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1a1a1a', padding: '10px', borderRadius: '8px', borderLeft: '3px solid #333'}}>
                     <span style={{color: '#fff', fontSize: '13px', fontWeight: 'bold'}}>{cliente.email}</span>
                     <div style={{display: 'flex', gap: '8px'}}>
-                      <button 
-                        onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)}
-                        style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}
-                      >
+                      <button onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)} style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}>
                         {cliente.acesso_backtest ? '🧪 B-TEST: ON' : '🧪 B-TEST: OFF'}
                       </button>
-                      <button 
-                        onClick={() => togglePermissao(cliente.id, 'acesso_ia', cliente.acesso_ia)}
-                        style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_ia ? '#00f2fe' : '#333', color: cliente.acesso_ia ? '#000' : '#888'}}
-                      >
+                      <button onClick={() => togglePermissao(cliente.id, 'acesso_ia', cliente.acesso_ia)} style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_ia ? '#00f2fe' : '#333', color: cliente.acesso_ia ? '#000' : '#888'}}>
                         {cliente.acesso_ia ? '🤖 I.A: ON' : '🤖 I.A: OFF'}
                       </button>
                     </div>
@@ -608,7 +602,7 @@ function App() {
         </div>
       )}
 
-      {/* 🔥 MENU DO USUÁRIO GERAL (RANKING E MÁXIMAS - AGORA VISÍVEL PRA TODO MUNDO) */}
+      {/* RANKING E MÁXIMAS */}
       <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
           <button onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }} style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}>
@@ -652,7 +646,7 @@ function App() {
         )}
       </div>
 
-      {/* 🔥 ÁREA DO RADAR (SEMPRE VISÍVEL E LIMPA) */}
+      {/* ÁREA DO RADAR E ABAS DE LIGAS */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="league-tabs" style={{ marginBottom: 0 }}>
           {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
@@ -675,7 +669,8 @@ function App() {
         <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>
             📡 RADAR - {ligaSelecionada.toUpperCase()}
-            {isAdmin && sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
+            {/* 🔥 Aviso sutil piscando no Radar para todos os usuários */}
+            {sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
           </h3>
           <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
             {ultimaAtualizacao && <span style={{fontSize: '11px', color: '#888'}}>Atualizado às {ultimaAtualizacao}</span>}
