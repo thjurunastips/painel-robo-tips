@@ -18,6 +18,9 @@ function App() {
   const [sinaisAtivos, setSinaisAtivos] = useState([]);
   const [dicasIA, setDicasIA] = useState([]);
   
+  const [alertasMaximas, setAlertasMaximas] = useState([]);
+  const [alertasNotificados, setAlertasNotificados] = useState([]); 
+  
   const [listaClientes, setListaClientes] = useState([]);
   
   const [nome, setNome] = useState('');
@@ -96,6 +99,22 @@ function App() {
     if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
   }, [matrizJogos, ligaSelecionada, estrategias, mercadoAtivo]);
 
+  useEffect(() => {
+    if (alertasMaximas.length > 0) {
+      const ligasAtuais = alertasMaximas.map(a => a.liga);
+      const ligasNovasParaApitar = ligasAtuais.filter(liga => !alertasNotificados.includes(liga));
+
+      if (ligasNovasParaApitar.length > 0) {
+        const somDeAlerta = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+        somDeAlerta.play().catch(err => console.log("O navegador bloqueou o áudio temporariamente.", err));
+        setAlertasNotificados(prev => [...prev, ...ligasNovasParaApitar]);
+      }
+      setAlertasNotificados(prev => prev.filter(liga => ligasAtuais.includes(liga)));
+    } else {
+      setAlertasNotificados([]);
+    }
+  }, [alertasMaximas]);
+
   async function buscarDados() {
     setErroDB('');
     const { data: est } = await supabase.from('estrategias').select('*').order('created_at', { ascending: false });
@@ -161,6 +180,7 @@ function App() {
   const calcularEstatisticasGlobais = (dadosMatriz) => {
     const timesStats = {};
     const maximasPorLiga = [];
+    let alertasMax = []; 
     const ligasUnicas = [...new Set(dadosMatriz.map(m => m.liga))];
 
     const dadosFiltradosParaRanking = dadosMatriz.filter(m => normalizar(m.liga) === normalizar(ligaSelecionada));
@@ -242,16 +262,25 @@ function App() {
 
       let maxStreak = 0; let currentStreak = 0;
       flatJogos.filter(j => j.placar !== "-").forEach(jogo => {
-        if (jogo.corDinamica === 'bg-red') { currentStreak++; if (currentStreak > maxStreak) maxStreak = currentStreak; } 
-        else if (jogo.corDinamica === 'bg-green') currentStreak = 0;
+        if (jogo.corDinamica === 'bg-red') { 
+            currentStreak++; 
+            if (currentStreak > maxStreak) maxStreak = currentStreak; 
+        } else if (jogo.corDinamica === 'bg-green') {
+            currentStreak = 0;
+        }
       });
-      maximasPorLiga.push({ liga: ligaNome, jogos_sem_ambas: maxStreak });
+      maximasPorLiga.push({ liga: ligaNome, jogos_sem_ambas: maxStreak, jejum_atual: currentStreak });
+
+      if (currentStreak === maxStreak && currentStreak >= 4) {
+        alertasMax.push({ liga: ligaNome, streak: currentStreak });
+      }
     });
 
     const sinaisUnicos = alertasGerados.filter((v, i, a) => a.findIndex(t => (t.liga === v.liga && t.horaAlvo === v.horaAlvo && JSON.stringify(t.minutosAlvo) === JSON.stringify(v.minutosAlvo))) === i);
 
     setSinaisAtivos(sinaisUnicos);
     setEstatisticasComp(maximasPorLiga);
+    setAlertasMaximas(alertasMax); 
   };
 
   const executarBacktest = async () => {
@@ -459,7 +488,6 @@ function App() {
         if (isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
         
-        // 🔥 Sem a trava do isAdmin, a caixinha pisca no radar para todo mundo
         if (isTrigger) classesExtras += " trigger-cell";
         if (isTarget) classesExtras += " target-cell";
         
@@ -470,7 +498,6 @@ function App() {
         );
       }
     }
-    // 🔥 Fallback da célula vazia também piscando para todo mundo
     return <div key={chave} className={`grid-cell empty-cell ${isTarget ? 'target-cell' : ''}`}>-</div>;
   };
 
@@ -602,7 +629,6 @@ function App() {
         </div>
       )}
 
-      {/* RANKING E MÁXIMAS */}
       <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
           <button onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }} style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}>
@@ -628,25 +654,60 @@ function App() {
           </div>
         )}
 
+        {/* 🔥 GAVETA DE MÁXIMAS AJUSTADA - FOCO NO JEJUM ATUAL */}
         {mostrarMaximasMobile && (
           <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', animation: 'fadeIn 0.3s ease' }}>
-            <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>⚠️ LIGAS COM MAIOR JEJUM S/ {nomeMercadoAtual}</h3>
+            <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '14px' }}>⚠️ MÁXIMA E JEJUM ATUAL - {nomeMercadoAtual}</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
-              {estatisticasComp.map((comp, i) => (
-                <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '12px' }}>
-                  <span style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{comp.liga}</span>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
-                    <span style={{ color: '#ff4444', fontSize: '20px', fontWeight: 'bold' }}>{comp.jogos_sem_ambas}</span>
-                    <span style={{ color: '#888', fontSize: '10px' }}>JOGOS SEGUIDOS</span>
+              {estatisticasComp.map((comp, i) => {
+                const taNaMaxima = comp.jejum_atual === comp.jogos_sem_ambas && comp.jogos_sem_ambas >= 4;
+                return (
+                  <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '12px', border: taNaMaxima ? '1px solid #ff4444' : 'none', boxShadow: taNaMaxima ? '0 0 10px rgba(255,68,68,0.2)' : 'none' }}>
+                    <span style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{comp.liga}</span>
+                    
+                    {/* O Jejum Atual Gigante e Vermelho no centro */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
+                      <span style={{ color: '#ff4444', fontSize: '24px', fontWeight: 'bold' }}>{comp.jejum_atual}</span>
+                      <span style={{ color: '#888', fontSize: '10px' }}>JEJUM ATUAL</span>
+                    </div>
+
+                    {/* A Máxima do Dia menorzinha como referência */}
+                    <div style={{ fontSize: '11px', color: '#ccc', marginTop: '6px', background: '#1a1a1a', padding: '4px 8px', borderRadius: '4px', width: '100%', textAlign: 'center' }}>
+                      Máxima do Dia: <strong style={{ color: '#fff', fontSize: '12px' }}>{comp.jogos_sem_ambas}</strong>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
       </div>
 
-      {/* ÁREA DO RADAR E ABAS DE LIGAS */}
+      {alertasMaximas.length > 0 && (
+        <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto', animation: 'fadeIn 0.5s ease' }}>
+          <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #ff4444', boxShadow: '0 0 15px rgba(255, 68, 68, 0.2)' }}>
+            <h3 style={{ color: '#ff4444', textAlign: 'center', marginBottom: '15px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <span style={{ animation: 'piscarAlerta 1s infinite' }}>🔥</span> OPORTUNIDADE: LIGA NO LIMITE DA MÁXIMA
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+              {alertasMaximas.map((alerta, i) => (
+                <div key={i} style={{ background: '#222', padding: '12px', borderRadius: '6px', borderLeft: '4px solid #ff4444' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{ color: '#fff', fontWeight: 'bold', fontSize: '14px' }}>🏆 {alerta.liga}</span>
+                    <span style={{ color: '#ffcc00', fontSize: '10px', fontWeight: 'bold', background: 'rgba(255, 204, 0, 0.1)', padding: '3px 6px', borderRadius: '4px' }}>
+                      {mercadosDrop.find(m => m.id === mercadoAtivo)?.label}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#ccc', lineHeight: '1.4' }}>
+                    O jejum atual atingiu a máxima do dia (<strong style={{color: '#ff4444', fontSize: '14px'}}>{alerta.streak} jogos</strong>). Excelente oportunidade para entrar no Rompimento!
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="league-tabs" style={{ marginBottom: 0 }}>
           {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
@@ -669,7 +730,6 @@ function App() {
         <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>
             📡 RADAR - {ligaSelecionada.toUpperCase()}
-            {/* 🔥 Aviso sutil piscando no Radar para todos os usuários */}
             {sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
           </h3>
           <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
