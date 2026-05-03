@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import './App.css';
@@ -32,7 +33,6 @@ function App() {
   const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
 
   const [mostrarRankingMobile, setMostrarRankingMobile] = useState(false);
-  // Mantendo o Jejum aberto por padrão no celular
   const [mostrarMaximasMobile, setMostrarMaximasMobile] = useState(true);
   
   const [abaAtual, setAbaAtual] = useState(null); 
@@ -80,7 +80,6 @@ function App() {
     else buscarDados(); 
   };
 
-  // 🔥 A FUNÇÃO DE ORDENAÇÃO ORIGINAL QUE FUNCIONA PERFEITAMENTE
   const sortHoursDescending = (horasArray) => {
     return horasArray.sort((a, b) => {
       let diff = b - a;
@@ -219,15 +218,8 @@ function App() {
       const hourAge = {};
       horasDesc.forEach((h, idx) => hourAge[h] = idx);
 
-      let todosMinutosLiga = new Set();
-      linhasDessaLiga.forEach(l => {
-          if(l.resultados) Object.keys(l.resultados).forEach(min => todosMinutosLiga.add(Number(min)));
-      });
-      const minutosOrdenados = [...todosMinutosLiga].sort((a, b) => a - b);
-
       let flatJogos = [];
       horasDesc.forEach(h => {
-        // 🔥 TRAVA DO JEJUM: O "find" garante que ele pegue apenas a linha exata que o usuário vê na tela
         const linha = linhasDessaLiga.find(m => Number(m.hora) === h);
         if (linha && linha.resultados) {
           Object.keys(linha.resultados).forEach(min => {
@@ -252,34 +244,22 @@ function App() {
         if (flatJogos.length >= tamanho) {
           for (let i = 0; i <= flatJogos.length - tamanho; i++) {
             let janela = flatJogos.slice(i, i + tamanho);
-            if (janela.some(j => !j.placar || j.placar === "-" || !/\d/.test(j.placar))) continue;
+            if (janela.some(j => !j.placar || j.placar === "-")) continue;
 
             let match = true;
+            let minsGatilho = [];
+            let jogosGat = [];
             for (let j = 0; j < tamanho; j++) {
               if (!checarPlacar(janela[j].placar, padrao[j])) { match = false; break; }
+              minsGatilho.push(janela[j].min);
+              jogosGat.push({ hora: janela[j].hora, min: janela[j].min });
             }
-
+            
             if (match) {
-              let alvosFuturos = [];
-              let hAtual = janela[tamanho - 1].hora;
-              let mAtual = janela[tamanho - 1].min;
-              let idxMin = minutosOrdenados.indexOf(mAtual);
-
-              for (let step = 0; step < 3; step++) {
-                  idxMin++;
-                  if (idxMin >= minutosOrdenados.length) {
-                      idxMin = 0;
-                      hAtual++;
-                      if (hAtual >= 24) hAtual = 0;
-                  }
-                  alvosFuturos.push({ hora: hAtual, min: minutosOrdenados[idxMin] });
-              }
-
-              // Salva apenas os alvos para desenhar o Neon na tela
-              alertasGerados.push({ 
-                  liga: ligaNome, 
-                  alvos: alvosFuturos 
-              });
+              let horaUltimoJogo = janela[tamanho - 1].hora;
+              let horaAlvo = horaUltimoJogo + 1;
+              if (horaAlvo >= 24) horaAlvo -= 24;
+              alertasGerados.push({ liga: ligaNome, horaAlvo: horaAlvo, minutosAlvo: minsGatilho, jogosGatilho: jogosGat });
             }
           }
         }
@@ -301,7 +281,7 @@ function App() {
       }
     });
 
-    const sinaisUnicos = alertasGerados.filter((v, i, a) => a.findIndex(t => (t.liga === v.liga && JSON.stringify(t.alvos) === JSON.stringify(v.alvos))) === i);
+    const sinaisUnicos = alertasGerados.filter((v, i, a) => a.findIndex(t => (t.liga === v.liga && t.horaAlvo === v.horaAlvo && JSON.stringify(t.minutosAlvo) === JSON.stringify(v.minutosAlvo))) === i);
 
     setSinaisAtivos(sinaisUnicos);
     setEstatisticasComp(maximasPorLiga);
@@ -439,10 +419,7 @@ function App() {
   const linhasDaLiga = matrizJogos.filter(m => normalizar(m.liga) === normalizar(ligaSelecionada));
   
   let hrsSet = new Set(linhasDaLiga.map(m => Number(m.hora)));
-  // Garante que as linhas dos alvos futuros também sejam renderizadas no radar
-  sinaisAtivos.filter(s => s.liga === ligaSelecionada).forEach(s => {
-      if (s.alvos) s.alvos.forEach(alvo => hrsSet.add(alvo.hora));
-  });
+  sinaisAtivos.filter(s => s.liga === ligaSelecionada).forEach(s => hrsSet.add(s.horaAlvo));
   
   const horasDinamicasArray = sortHoursDescending([...hrsSet]);
   const horasParaMostrar = horasDinamicasArray.length > 0 ? horasDinamicasArray.slice(0, 12) : [];
@@ -465,7 +442,6 @@ function App() {
   
   let todosJogosRadar = [];
   horasDescLocal.forEach(h => {
-    // 🔥 Trava do .find no radar
     const linha = linhasDaLiga.find(m => Number(m.hora) === h);
     if(linha && linha.resultados) {
       Object.keys(linha.resultados).forEach(min => {
@@ -506,8 +482,9 @@ function App() {
 
   const renderCell = (hora, min) => {
     const chave = `${hora}-${min}`;
-    // Apenas alvos neon, zero gatilhos amarelos
-    const isTarget = sinaisAtivos.some(s => s.liga === ligaSelecionada && s.alvos && s.alvos.some(alvo => alvo.hora === Number(hora) && alvo.min === Number(min)));
+    
+    // Mantendo apenas o Alvo (Azul) para todo mundo
+    const isTarget = sinaisAtivos.some(s => s.liga === ligaSelecionada && s.horaAlvo === Number(hora) && s.minutosAlvo.includes(Number(min)));
 
     if (matrizJogos.length > 0) {
       const linha = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
@@ -520,6 +497,8 @@ function App() {
         let classesExtras = "";
         if (isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
+        
+        // Removemos o trigger-cell amarelo definitivamente daqui
         if (isTarget) classesExtras += " target-cell";
         
         return (
