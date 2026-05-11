@@ -1,10 +1,18 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import './App.css';
 
 function App() {
-  const [usuarioLogado, setUsuarioLogado] = useState(null);
+  // 🔥 CONTROLE DE TELAS: 'landing' (Vendas), 'login' (Acesso), 'dashboard' (Logado)
+  const [telaAtiva, setTelaAtiva] = useState('landing');
+
+  // SEGURANÇA E SESSÃO
+  const [usuarioLogado, setUsuarioLogado] = useState(() => {
+    const salvo = localStorage.getItem('usuarioLogado');
+    return salvo ? JSON.parse(salvo) : null;
+  });
+  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem('sessionToken') || '');
+
   const [loginEmail, setLoginEmail] = useState('');
   const [loginSenha, setLoginSenha] = useState('');
   const [erroLogin, setErroLogin] = useState('');
@@ -31,10 +39,10 @@ function App() {
   const [ligaSelecionada, setLigaSelecionada] = useState('Copa');
   const [placarFiltro, setPlacarFiltro] = useState(null); 
   const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
-
+  
+  const [mostrarOdds, setMostrarOdds] = useState(true);
   const [mostrarRankingMobile, setMostrarRankingMobile] = useState(false);
   const [mostrarMaximasMobile, setMostrarMaximasMobile] = useState(true);
-  
   const [abaAtual, setAbaAtual] = useState(null); 
 
   const ligasDisponiveis = ['Copa', 'Euro', 'Sul-Americana', 'Premier'];
@@ -58,13 +66,38 @@ function App() {
   const efetuarLogin = async (e) => {
     e.preventDefault();
     setErroLogin('');
-    const { data, error } = await supabase.from('usuarios').select('*').eq('email', loginEmail).eq('senha', loginSenha).single();
-    if (error || !data) setErroLogin('Usuário ou senha incorretos!');
-    else setUsuarioLogado(data);
+    
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('email', loginEmail)
+      .eq('senha', loginSenha)
+      .single();
+
+    if (error || !data) {
+      setErroLogin('Usuário ou senha incorretos!');
+      return;
+    }
+
+    const newToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    await supabase.from('usuarios').update({ session_token: newToken }).eq('id', data.id);
+
+    localStorage.setItem('usuarioLogado', JSON.stringify(data));
+    localStorage.setItem('sessionToken', newToken);
+
+    setSessionToken(newToken);
+    setUsuarioLogado(data);
   };
 
   const fazerLogout = () => {
-    setUsuarioLogado(null); setLoginEmail(''); setLoginSenha(''); setAbaAtual(null);
+    setUsuarioLogado(null);
+    setSessionToken('');
+    localStorage.removeItem('usuarioLogado');
+    localStorage.removeItem('sessionToken');
+    setLoginEmail(''); 
+    setLoginSenha(''); 
+    setAbaAtual(null);
+    setTelaAtiva('landing'); // Volta pra home ao sair
   };
 
   const cadastrarCliente = async () => {
@@ -91,10 +124,32 @@ function App() {
 
   useEffect(() => {
     if (!usuarioLogado) return;
-    buscarDados(); 
-    const intervalId = setInterval(() => { buscarDados(); }, 10000); 
+
+    const validarSessaoEBuscarDados = async () => {
+      if (usuarioLogado.role === 'admin') {
+        buscarDados();
+        return;
+      }
+
+      const { data: userDB } = await supabase
+        .from('usuarios')
+        .select('session_token')
+        .eq('id', usuarioLogado.id)
+        .single();
+
+      if (userDB && userDB.session_token !== sessionToken) {
+        alert("⚠️ ATENÇÃO: Sua conta foi conectada em outro dispositivo. Você foi desconectado.");
+        fazerLogout();
+        return; 
+      }
+
+      buscarDados();
+    };
+
+    validarSessaoEBuscarDados(); 
+    const intervalId = setInterval(() => { validarSessaoEBuscarDados(); }, 10000); 
     return () => clearInterval(intervalId);
-  }, [usuarioLogado]);
+  }, [usuarioLogado, sessionToken]);
 
   useEffect(() => {
     if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
@@ -134,17 +189,21 @@ function App() {
     else if (matriz) { setMatrizJogos([...matriz]); setUltimaAtualizacao(new Date().toLocaleTimeString()); }
   }
 
-  const deletarEstrategia = async (id) => {
-    await supabase.from('estrategias').delete().eq('id', id);
-    buscarDados();
-  };
-
   const normalizar = (texto) => String(texto).trim().toLowerCase();
 
   const checarPlacar = (placar, condicao) => {
-    if (!placar || placar === "-") return false;
-    const p_limpo = String(placar).trim();
-    const [c, f] = p_limpo.split("-").map(Number);
+    if (!placar) return false;
+    const p = String(placar).trim();
+    if (p === "-" || p === "?") return false;
+    if (!p.includes("-")) return false; 
+
+    const [cStr, fStr] = p.split("-");
+    if (cStr === undefined || fStr === undefined || cStr.trim() === "" || fStr.trim() === "") return false;
+
+    const c = Number(cStr);
+    const f = Number(fStr);
+    if (isNaN(c) || isNaN(f)) return false;
+    
     const total = c + f;
     const cond = String(condicao).replace(/\s/g, '').toUpperCase();
 
@@ -157,13 +216,22 @@ function App() {
     if (cond === "+0.5" || cond === "OVER0.5" || cond === "0.5") return total >= 1;
     if (cond === "-0.5" || cond === "UNDER0.5") return total === 0;
     if (cond === "AMBAS" || cond === "BTTS") return c > 0 && f > 0;
-    return p_limpo === cond;
+    return p === cond;
   };
 
   const calcularCorDinamica = (placar, mercado) => {
-    if (!placar || placar === "-") return "empty-cell";
-    const [c, f] = String(placar).split("-").map(Number);
+    if (!placar) return "empty-cell";
+    const p = String(placar).trim();
+    if (p === "-" || p === "?") return "empty-cell";
+    if (!p.includes("-")) return "empty-cell"; 
+    
+    const [cStr, fStr] = p.split("-");
+    if (cStr === undefined || fStr === undefined || cStr.trim() === "" || fStr.trim() === "") return "empty-cell";
+
+    const c = Number(cStr);
+    const f = Number(fStr);
     if (isNaN(c) || isNaN(f)) return "empty-cell";
+    
     const total = c + f;
     let isGreen = false;
     switch (mercado) {
@@ -188,7 +256,8 @@ function App() {
     dadosFiltradosParaRanking.forEach(linha => {
       if (linha.resultados) {
         Object.values(linha.resultados).forEach(jogo => {
-          if (jogo.home && jogo.away && jogo.placar && /\d/.test(jogo.placar)) {
+          if (calcularCorDinamica(jogo.placar, mercadoAtivo) !== "empty-cell") {
+            const [c, f] = String(jogo.placar).split("-").map(Number);
             if (!timesStats[jogo.home]) timesStats[jogo.home] = { jogos: 0, hits: 0 };
             if (!timesStats[jogo.away]) timesStats[jogo.away] = { jogos: 0, hits: 0 };
             timesStats[jogo.home].jogos += 1;
@@ -230,7 +299,7 @@ function App() {
       });
 
       flatJogos.sort((a, b) => {
-        if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[b.hora] - hourAge[a.hora]; 
+        if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[a.hora] - hourAge[b.hora]; 
         return a.min - b.min; 
       });
 
@@ -244,29 +313,28 @@ function App() {
         if (flatJogos.length >= tamanho) {
           for (let i = 0; i <= flatJogos.length - tamanho; i++) {
             let janela = flatJogos.slice(i, i + tamanho);
-            if (janela.some(j => !j.placar || j.placar === "-")) continue;
+            if (janela.some(j => calcularCorDinamica(j.placar, mercadoAtivo) === "empty-cell")) continue;
 
             let match = true;
             let minsGatilho = [];
-            let jogosGat = [];
             for (let j = 0; j < tamanho; j++) {
               if (!checarPlacar(janela[j].placar, padrao[j])) { match = false; break; }
               minsGatilho.push(janela[j].min);
-              jogosGat.push({ hora: janela[j].hora, min: janela[j].min });
             }
             
             if (match) {
               let horaUltimoJogo = janela[tamanho - 1].hora;
-              let horaAlvo = horaUltimoJogo + 1;
+              let horaAlvo = horaUltimoJogo + 1; 
               if (horaAlvo >= 24) horaAlvo -= 24;
-              alertasGerados.push({ liga: ligaNome, horaAlvo: horaAlvo, minutosAlvo: minsGatilho, jogosGatilho: jogosGat });
+              
+              alertasGerados.push({ liga: ligaNome, horaAlvo: horaAlvo, minutosAlvo: minsGatilho });
             }
           }
         }
       });
 
       let maxStreak = 0; let currentStreak = 0;
-      flatJogos.filter(j => j.placar && /\d/.test(j.placar)).forEach(jogo => {
+      flatJogos.filter(j => j.corDinamica !== "empty-cell").forEach(jogo => {
         if (jogo.corDinamica === 'bg-red') { 
             currentStreak++; 
             if (currentStreak > maxStreak) maxStreak = currentStreak; 
@@ -390,10 +458,116 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' }); 
   };
 
-  if (!usuarioLogado) {
+  // ==========================================
+  // 🔥 RENDERIZAÇÃO DA PÁGINA DE VENDAS (LANDING)
+  // ==========================================
+  if (!usuarioLogado && telaAtiva === 'landing') {
+    return (
+      <div style={{ backgroundColor: '#0a0a0a', color: '#fff', minHeight: '100vh', fontFamily: 'sans-serif' }}>
+        {/* HEADER */}
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: '1px solid #222' }}>
+          <h2 style={{ margin: 0, fontSize: '22px', color: '#fff' }}>TH JURUNAS <span style={{ color: '#9FC131' }}>SYSTEM</span></h2>
+          <button onClick={() => setTelaAtiva('login')} style={{ background: 'transparent', border: '1px solid #9FC131', color: '#9FC131', padding: '8px 20px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', transition: '0.3s' }}>
+            JÁ SOU VIP (ENTRAR)
+          </button>
+        </header>
+
+        {/* HERO SECTION */}
+        <section style={{ textAlign: 'center', padding: '80px 20px', maxWidth: '800px', margin: '0 auto' }}>
+          <h1 style={{ fontSize: '42px', marginBottom: '20px', lineHeight: '1.2' }}>Aumente sua Assertividade no <span style={{ color: '#00f2fe' }}>Futebol Virtual</span></h1>
+          <p style={{ fontSize: '18px', color: '#aaa', marginBottom: '40px', lineHeight: '1.6' }}>
+            O único Radar Esportivo equipado com Inteligência Artificial que identifica Padrões Ouro e valida entradas ao vivo com Backtest em tempo real. Pare de depender da sorte.
+          </p>
+          <a href="#planos" style={{ display: 'inline-block', textDecoration: 'none', background: '#9FC131', color: '#000', padding: '15px 40px', fontSize: '18px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 0 20px rgba(159, 193, 49, 0.4)' }}>
+            QUERO ACESSO AO RADAR
+          </a>
+        </section>
+
+        {/* FEATURES */}
+        <section style={{ background: '#111', padding: '60px 20px' }}>
+          <h2 style={{ textAlign: 'center', fontSize: '28px', marginBottom: '40px' }}>Por que escolher o nosso sistema?</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', justifyContent: 'center', maxWidth: '1000px', margin: '0 auto' }}>
+            
+            <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '10px', flex: '1 1 250px', borderTop: '3px solid #9FC131' }}>
+              <h3 style={{ color: '#9FC131', marginTop: 0 }}>📡 Radar Ao Vivo</h3>
+              <p style={{ color: '#ccc', fontSize: '14px', lineHeight: '1.5' }}>Acompanhe as Ligas Copa, Euro, Sul-Americana e Premier com cores e alertas visuais (Neon) em tempo real, sem delay.</p>
+            </div>
+
+            <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '10px', flex: '1 1 250px', borderTop: '3px solid #00f2fe' }}>
+              <h3 style={{ color: '#00f2fe', marginTop: 0 }}>🤖 Inteligência Artificial</h3>
+              <p style={{ color: '#ccc', fontSize: '14px', lineHeight: '1.5' }}>Nosso robô lê milhares de jogos diários e te entrega os "Padrões Ouro" mastigados, com a % exata de Win Rate para você lucrar.</p>
+            </div>
+
+            <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '10px', flex: '1 1 250px', borderTop: '3px solid #ffcc00' }}>
+              <h3 style={{ color: '#ffcc00', marginTop: 0 }}>🧪 Backtest Rápido</h3>
+              <p style={{ color: '#ccc', fontSize: '14px', lineHeight: '1.5' }}>Não teste na sua banca. Digite o padrão no Laboratório e o sistema calcula instantaneamente se aquela estratégia é lucrativa ou não.</p>
+            </div>
+
+          </div>
+        </section>
+
+        {/* PLANOS & PREÇOS */}
+        <section id="planos" style={{ padding: '80px 20px', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '32px', marginBottom: '10px' }}>Escolha seu Plano VIP</h2>
+          <p style={{ color: '#aaa', marginBottom: '50px' }}>Acesso total ao Radar, Inteligência Artificial e Backtest.</p>
+          
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', justifyContent: 'center', maxWidth: '800px', margin: '0 auto' }}>
+            
+            <div style={{ background: '#111', border: '1px solid #333', padding: '40px', borderRadius: '15px', flex: '1 1 300px' }}>
+              <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>MENSAL</h3>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 49<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
+                <li>✅ Acesso ao Radar 24/7</li>
+                <li>✅ Ligas: Copa, Euro, Sul e Premier</li>
+                <li>✅ Alertas de Máximas (Red)</li>
+                <li>❌ Inteligência Artificial Ouro</li>
+              </ul>
+              {/* TROQUE O LINK DO WHATSAPP AQUI */}
+              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+                ASSINAR MENSAL
+              </a>
+            </div>
+
+            <div style={{ background: '#1a1a1a', border: '2px solid #00f2fe', padding: '40px', borderRadius: '15px', flex: '1 1 300px', transform: 'scale(1.05)', boxShadow: '0 0 30px rgba(0, 242, 254, 0.15)' }}>
+              <div style={{ background: '#00f2fe', color: '#000', fontSize: '12px', fontWeight: 'bold', padding: '5px 10px', borderRadius: '20px', display: 'inline-block', marginBottom: '15px' }}>MAIS VENDIDO</div>
+              <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>VIP PRO</h3>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 97<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
+                <li>✅ Acesso ao Radar 24/7</li>
+                <li>✅ Laboratório de Backtest Liberado</li>
+                <li>✅ Dicas da Inteligência Artificial</li>
+                <li>✅ Suporte Prioritário</li>
+              </ul>
+              {/* TROQUE O LINK DO WHATSAPP AQUI */}
+              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+                ASSINAR VIP PRO
+              </a>
+            </div>
+
+          </div>
+        </section>
+
+        {/* FOOTER */}
+        <footer style={{ textAlign: 'center', padding: '40px', background: '#050505', borderTop: '1px solid #111', color: '#666', fontSize: '12px' }}>
+          <p>© {new Date().getFullYear()} TH JURUNAS SYSTEM. Todos os direitos reservados.</p>
+          <button onClick={() => setTelaAtiva('login')} style={{ background: 'transparent', border: 'none', color: '#9FC131', cursor: 'pointer', textDecoration: 'underline' }}>Já tem uma conta? Faça Login.</button>
+        </footer>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 🔥 TELA DE LOGIN 
+  // ==========================================
+  if (!usuarioLogado && telaAtiva === 'login') {
     return (
       <div className="login-container">
         <div className="login-box">
+          {/* Botão de Voltar para Vendas */}
+          <button onClick={() => setTelaAtiva('landing')} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', marginBottom: '20px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            ← Voltar para o Início
+          </button>
+
           <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px'}}>TH JURUNAS <span>SYSTEM</span></h2>
           <form onSubmit={efetuarLogin}>
             <label>USUÁRIO</label>
@@ -407,6 +581,10 @@ function App() {
       </div>
     );
   }
+
+  // ==========================================
+  // 🔥 O SISTEMA (DASHBOARD) SÓ RODA DAQUI PRA BAIXO SE ESTIVER LOGADO
+  // ==========================================
 
   const isAdmin = usuarioLogado.role === 'admin';
   const canViewBacktest = isAdmin || usuarioLogado.acesso_backtest;
@@ -436,17 +614,17 @@ function App() {
   minutosDinamicos.sort((a, b) => a - b);
   const minutosCols = minutosDinamicos.length > 0 ? minutosDinamicos : [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58];
 
-  let celulasMaxima = []; let streakAtual = [];
   const horasDescLocal = sortHoursDescending([...new Set(linhasDaLiga.map(m => Number(m.hora)))]);
   const hourAgeLocal = {}; horasDescLocal.forEach((h, idx) => hourAgeLocal[h] = idx);
   
+  let celulasMaxima = []; let streakAtual = [];
   let todosJogosRadar = [];
   horasDescLocal.forEach(h => {
     const linha = linhasDaLiga.find(m => Number(m.hora) === h);
     if(linha && linha.resultados) {
       Object.keys(linha.resultados).forEach(min => {
         const jogo = linha.resultados[min];
-        if (jogo.placar && /\d/.test(jogo.placar)) {
+        if (calcularCorDinamica(jogo.placar, mercadoAtivo) !== "empty-cell") {
            todosJogosRadar.push({ hora: Number(linha.hora), min: Number(min), corDinamica: calcularCorDinamica(jogo.placar, mercadoAtivo) });
         }
       });
@@ -471,9 +649,9 @@ function App() {
       const linha = linhasDaLiga.find(m => Number(m.hora) === h);
       if (linha && linha.resultados && linha.resultados[String(min)]) {
         const jogo = linha.resultados[String(min)];
-        if (jogo.placar && /\d/.test(jogo.placar)) {
-          totalValidos++;
-          if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreens++;
+        if (calcularCorDinamica(jogo.placar, mercadoAtivo) !== "empty-cell") {
+             totalValidos++;
+             if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreens++;
         }
       }
     });
@@ -482,9 +660,10 @@ function App() {
 
   const renderCell = (hora, min) => {
     const chave = `${hora}-${min}`;
-    
-    // Mantendo apenas o Alvo (Azul) para todo mundo
     const isTarget = sinaisAtivos.some(s => s.liga === ligaSelecionada && s.horaAlvo === Number(hora) && s.minutosAlvo.includes(Number(min)));
+
+    let classesExtras = "";
+    if (isTarget) classesExtras += " target-cell";
 
     if (matrizJogos.length > 0) {
       const linha = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
@@ -494,21 +673,49 @@ function App() {
         const isSelected = placarFiltro === res.placar;
         const corDefinitiva = calcularCorDinamica(res.placar, mercadoAtivo);
 
-        let classesExtras = "";
         if (isMaxima) classesExtras += " blink-maxima";
         if (isSelected) classesExtras += " selected-score";
         
-        // Removemos o trigger-cell amarelo definitivamente daqui
-        if (isTarget) classesExtras += " target-cell";
+        const rawPlacar = String(res.placar || "").trim();
+        const hasHyphen = rawPlacar.includes("-");
+        const isPlacarVazio = rawPlacar === "-" || rawPlacar === "?" || rawPlacar === "";
+        
+        const oddSimDB = res.odd_sim && String(res.odd_sim).trim() !== "None" && String(res.odd_sim).trim() !== "-" && String(res.odd_sim).trim() !== "?" ? res.odd_sim : null;
+        const isOddInjetada = !hasHyphen && !isPlacarVazio && /\d/.test(rawPlacar);
+        
+        const oddParaMostrar = isOddInjetada ? rawPlacar : oddSimDB;
+
+        let content;
+        if (hasHyphen) {
+            if (mostrarOdds && oddParaMostrar) {
+                content = (
+                    <>
+                      <div style={{ fontSize: '11px', lineHeight: '1' }}>{rawPlacar}</div>
+                      <div style={{ color: '#ffcc00', fontSize: '8.5px', fontWeight: 'bold', lineHeight: '1', marginTop: '1px' }}>{oddParaMostrar}</div>
+                    </>
+                );
+            } else {
+                content = rawPlacar;
+            }
+        } else if (oddParaMostrar) {
+            if (mostrarOdds) {
+                content = <div style={{ color: '#ffcc00', fontSize: '10px', fontWeight: 'bold' }}>{oddParaMostrar}</div>;
+            } else {
+                content = <div style={{ color: '#888', fontSize: '8px' }}> - </div>;
+            }
+        } else {
+            let emptyChar = (rawPlacar === "?" || rawPlacar === "-") ? rawPlacar : "-";
+            content = <div style={{ color: '#888', fontSize: '8px' }}> {emptyChar} </div>;
+        }
         
         return (
           <div key={chave} className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', lineHeight: '1.2' }}>
-            {res.placar === "-" ? ( (res.odd_sim === "None" || !res.odd_sim || res.odd_sim === "-") ? <div style={{ color: '#888', fontSize: '8px' }}> - </div> : <div style={{ color: '#ffcc00', fontSize: '10px', fontWeight: 'bold' }}>{res.odd_sim}</div> ) : res.placar}
+            {content}
           </div>
         );
       }
     }
-    return <div key={chave} className={`grid-cell empty-cell ${isTarget ? 'target-cell' : ''}`}>-</div>;
+    return <div key={chave} className={`grid-cell empty-cell ${classesExtras}`}>-</div>;
   };
 
   const sinaisDessaLiga = sinaisAtivos.filter(s => s.liga === ligaSelecionada);
@@ -713,21 +920,37 @@ function App() {
         </div>
       )}
 
+      {/* OS SELETORES: MERCADO E VISUALIZAÇÃO DE ODDS */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="league-tabs" style={{ marginBottom: 0 }}>
           {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
         </div>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#888' }}>MERCADO:</span>
-          <select 
-            className="flet-input" 
-            style={{ width: 'auto', padding: '8px 15px', borderRadius: '8px', border: '1px solid #9FC131', color: '#9FC131', fontWeight: 'bold', cursor: 'pointer' }}
-            value={mercadoAtivo}
-            onChange={(e) => setMercadoAtivo(e.target.value)}
-          >
-            {mercadosDrop.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#888' }}>MERCADO:</span>
+            <select 
+              className="flet-input" 
+              style={{ width: 'auto', padding: '6px 10px', borderRadius: '8px', border: '1px solid #9FC131', color: '#9FC131', fontWeight: 'bold', cursor: 'pointer', background: '#111' }}
+              value={mercadoAtivo}
+              onChange={(e) => setMercadoAtivo(e.target.value)}
+            >
+              {mercadosDrop.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#888' }}>VISUALIZAÇÃO:</span>
+            <select 
+              className="flet-input" 
+              style={{ width: 'auto', padding: '6px 10px', borderRadius: '8px', border: '1px solid #00f2fe', color: '#00f2fe', fontWeight: 'bold', cursor: 'pointer', background: '#111' }}
+              value={mostrarOdds ? "COM_ODD" : "SEM_ODD"}
+              onChange={(e) => setMostrarOdds(e.target.value === "COM_ODD")}
+            >
+              <option value="SEM_ODD">Sem Odds</option>
+              <option value="COM_ODD">Com Odds</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -772,14 +995,12 @@ function App() {
               const linhaDados = linhasDaLiga.find(m => Number(m.hora) === Number(hora));
               if (linhaDados && linhaDados.resultados) {
                 Object.values(linhaDados.resultados).forEach(jogo => {
-                  if (jogo.placar && /\d/.test(jogo.placar)) {
-                    totalValidosRow++;
-                    if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
-                    const pParts = String(jogo.placar).split("-");
-                    if (pParts.length === 2) {
-                      const c = parseInt(pParts[0].trim(), 10);
-                      const f = parseInt(pParts[1].trim(), 10);
-                      if (!isNaN(c) && !isNaN(f)) totalGolsRow += (c + f);
+                  if (calcularCorDinamica(jogo.placar, mercadoAtivo) !== "empty-cell") {
+                    const [c, f] = String(jogo.placar).split("-").map(Number);
+                    if (!isNaN(c) && !isNaN(f)) {
+                      totalValidosRow++;
+                      if (calcularCorDinamica(jogo.placar, mercadoAtivo) === 'bg-green') totalGreensRow++;
+                      totalGolsRow += (c + f);
                     }
                   }
                 });
