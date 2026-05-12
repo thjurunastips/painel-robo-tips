@@ -515,7 +515,7 @@ function App() {
             
             <div style={{ background: '#111', border: '1px solid #333', padding: '40px', borderRadius: '15px', flex: '1 1 300px' }}>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>MENSAL</h3>
-              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 49<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 30<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
               <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
                 <li>✅ Acesso ao Radar 24/7</li>
                 <li>✅ Ligas: Copa, Euro, Sul e Premier</li>
@@ -531,7 +531,7 @@ function App() {
             <div style={{ background: '#1a1a1a', border: '2px solid #00f2fe', padding: '40px', borderRadius: '15px', flex: '1 1 300px', transform: 'scale(1.05)', boxShadow: '0 0 30px rgba(0, 242, 254, 0.15)' }}>
               <div style={{ background: '#00f2fe', color: '#000', fontSize: '12px', fontWeight: 'bold', padding: '5px 10px', borderRadius: '20px', display: 'inline-block', marginBottom: '15px' }}>MAIS VENDIDO</div>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>VIP PRO</h3>
-              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 97<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 50<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
               <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
                 <li>✅ Acesso ao Radar 24/7</li>
                 <li>✅ Laboratório de Backtest Liberado</li>
