@@ -523,7 +523,7 @@ function App() {
                 <li>❌ Inteligência Artificial Ouro</li>
               </ul>
               {/* TROQUE O LINK DO WHATSAPP AQUI */}
-              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+              <a href="https://wa.me/5585981618587?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
                 ASSINAR MENSAL
               </a>
             </div>
@@ -539,7 +539,7 @@ function App() {
                 <li>✅ Suporte Prioritário</li>
               </ul>
               {/* TROQUE O LINK DO WHATSAPP AQUI */}
-              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+              <a href="https://wa.me/5585981618587?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
                 ASSINAR VIP PRO
               </a>
             </div>
