@@ -159,22 +159,30 @@ function App() {
     });
   };
 
+  // 🔥 CORREÇÃO DO FALSO POSITIVO APLICADA AQUI
+  // 🔥 SEGURANÇA IMUNE A BUGS DE MEMÓRIA
   useEffect(() => {
     if (!usuarioLogado) return;
 
     const validarSessaoEBuscarDados = async () => {
+      // 1. FURA O BUG DO REACT: Pega o ticket em tempo real direto da memória do navegador
+      const tokenAtualDoNavegador = localStorage.getItem('sessionToken');
+
       if (usuarioLogado.role === 'admin') {
         buscarDados();
         return;
       }
 
-      const { data: userDB } = await supabase
+      const { data: userDB, error } = await supabase
         .from('usuarios')
         .select('session_token')
         .eq('id', usuarioLogado.id)
         .single();
 
-      if (userDB && userDB.session_token !== sessionToken) {
+      if (error) return; // Se a internet piscar, não expulsa o usuário à toa
+
+      // 2. Compara o Banco com o HD do navegador (e não com a memória atrasada do React)
+      if (userDB && userDB.session_token !== tokenAtualDoNavegador) {
         alert("⚠️ ATENÇÃO: Sua conta foi conectada em outro dispositivo. Você foi desconectado.");
         fazerLogout();
         return; 
@@ -183,10 +191,16 @@ function App() {
       buscarDados();
     };
 
-    validarSessaoEBuscarDados(); 
-    const intervalId = setInterval(() => { validarSessaoEBuscarDados(); }, 10000); 
+    // Carrega o radar na hora que a tela abre
+    buscarDados(); 
+
+    // Deixa o leão de chácara verificando a cada 10s
+    const intervalId = setInterval(() => { 
+      validarSessaoEBuscarDados(); 
+    }, 10000); 
+
     return () => clearInterval(intervalId);
-  }, [usuarioLogado, sessionToken]);
+  }, [usuarioLogado]); // Removi o sessionToken daqui para não bugar o timer
 
   useEffect(() => {
     if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
