@@ -17,8 +17,12 @@ function App() {
   const [loginSenha, setLoginSenha] = useState('');
   const [erroLogin, setErroLogin] = useState('');
   
+  // ESTADOS DO CRUD DE CLIENTES
   const [novoUserEmail, setNovoUserEmail] = useState('');
   const [novoUserSenha, setNovoUserSenha] = useState('');
+  const [editandoId, setEditandoId] = useState(null);
+  const [editEmail, setEditEmail] = useState('');
+  const [editSenha, setEditSenha] = useState('');
 
   const [estrategias, setEstrategias] = useState([]);
   const [rankingTimes, setRankingTimes] = useState([]);
@@ -63,6 +67,7 @@ function App() {
     { id: 'GOLEADA', label: '+5 Gols de um Time' },
   ];
 
+  // 🔥 LOGIN BLINDADO COM REGISTRO DE ÚLTIMO ACESSO
   const efetuarLogin = async (e) => {
     e.preventDefault();
     setErroLogin('');
@@ -80,7 +85,13 @@ function App() {
     }
 
     const newToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    await supabase.from('usuarios').update({ session_token: newToken }).eq('id', data.id);
+    const dataAtual = new Date().toISOString(); // Guarda a hora exata do login
+
+    // Atualiza o ticket de sessão E o último login no banco
+    await supabase.from('usuarios').update({ 
+      session_token: newToken,
+      ultimo_login: dataAtual
+    }).eq('id', data.id);
 
     localStorage.setItem('usuarioLogado', JSON.stringify(data));
     localStorage.setItem('sessionToken', newToken);
@@ -97,14 +108,40 @@ function App() {
     setLoginEmail(''); 
     setLoginSenha(''); 
     setAbaAtual(null);
-    setTelaAtiva('landing'); // Volta pra home ao sair
+    setTelaAtiva('landing'); 
   };
 
+  // 🔥 FUNÇÕES DE CRUD (CREATE, UPDATE, DELETE)
   const cadastrarCliente = async () => {
     if (!novoUserEmail || !novoUserSenha) return alert("Preencha email e senha!");
     const { error } = await supabase.from('usuarios').insert([{ email: novoUserEmail, senha: novoUserSenha, role: 'user', acesso_backtest: false, acesso_ia: false }]);
     if (error) alert("❌ Erro: " + error.message);
     else { alert("✅ Cliente cadastrado com sucesso!"); setNovoUserEmail(''); setNovoUserSenha(''); buscarDados(); }
+  };
+
+  const iniciarEdicao = (cliente) => {
+    setEditandoId(cliente.id);
+    setEditEmail(cliente.email);
+    setEditSenha(cliente.senha);
+  };
+
+  const salvarEdicao = async (id) => {
+    if (!editEmail || !editSenha) return alert("Email e senha não podem ficar vazios!");
+    const { error } = await supabase.from('usuarios').update({ email: editEmail, senha: editSenha }).eq('id', id);
+    if (error) alert("❌ Erro ao atualizar: " + error.message);
+    else {
+      setEditandoId(null);
+      buscarDados();
+    }
+  };
+
+  const deletarCliente = async (id, email) => {
+    const confirmacao = window.confirm(`ATENÇÃO: Tem certeza que deseja excluir o cliente ${email} do sistema?`);
+    if (confirmacao) {
+      const { error } = await supabase.from('usuarios').delete().eq('id', id);
+      if (error) alert("❌ Erro ao excluir: " + error.message);
+      else buscarDados();
+    }
   };
 
   const togglePermissao = async (id, campo, valorAtual) => {
@@ -464,7 +501,6 @@ function App() {
   if (!usuarioLogado && telaAtiva === 'landing') {
     return (
       <div style={{ backgroundColor: '#0a0a0a', color: '#fff', minHeight: '100vh', fontFamily: 'sans-serif' }}>
-        {/* HEADER */}
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: '1px solid #222' }}>
           <h2 style={{ margin: 0, fontSize: '22px', color: '#fff' }}>TH JURUNAS <span style={{ color: '#9FC131' }}>SYSTEM</span></h2>
           <button onClick={() => setTelaAtiva('login')} style={{ background: 'transparent', border: '1px solid #9FC131', color: '#9FC131', padding: '8px 20px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', transition: '0.3s' }}>
@@ -472,7 +508,6 @@ function App() {
           </button>
         </header>
 
-        {/* HERO SECTION */}
         <section style={{ textAlign: 'center', padding: '80px 20px', maxWidth: '800px', margin: '0 auto' }}>
           <h1 style={{ fontSize: '42px', marginBottom: '20px', lineHeight: '1.2' }}>Aumente sua Assertividade no <span style={{ color: '#00f2fe' }}>Futebol Virtual</span></h1>
           <p style={{ fontSize: '18px', color: '#aaa', marginBottom: '40px', lineHeight: '1.6' }}>
@@ -483,71 +518,58 @@ function App() {
           </a>
         </section>
 
-        {/* FEATURES */}
         <section style={{ background: '#111', padding: '60px 20px' }}>
           <h2 style={{ textAlign: 'center', fontSize: '28px', marginBottom: '40px' }}>Por que escolher o nosso sistema?</h2>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', justifyContent: 'center', maxWidth: '1000px', margin: '0 auto' }}>
-            
             <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '10px', flex: '1 1 250px', borderTop: '3px solid #9FC131' }}>
               <h3 style={{ color: '#9FC131', marginTop: 0 }}>📡 Radar Ao Vivo</h3>
               <p style={{ color: '#ccc', fontSize: '14px', lineHeight: '1.5' }}>Acompanhe as Ligas Copa, Euro, Sul-Americana e Premier com cores e alertas visuais (Neon) em tempo real, sem delay.</p>
             </div>
-
             <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '10px', flex: '1 1 250px', borderTop: '3px solid #00f2fe' }}>
               <h3 style={{ color: '#00f2fe', marginTop: 0 }}>🤖 Inteligência Artificial</h3>
               <p style={{ color: '#ccc', fontSize: '14px', lineHeight: '1.5' }}>Nosso robô lê milhares de jogos diários e te entrega os "Padrões Ouro" mastigados, com a % exata de Win Rate para você lucrar.</p>
             </div>
-
             <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '10px', flex: '1 1 250px', borderTop: '3px solid #ffcc00' }}>
               <h3 style={{ color: '#ffcc00', marginTop: 0 }}>🧪 Backtest Rápido</h3>
               <p style={{ color: '#ccc', fontSize: '14px', lineHeight: '1.5' }}>Não teste na sua banca. Digite o padrão no Laboratório e o sistema calcula instantaneamente se aquela estratégia é lucrativa ou não.</p>
             </div>
-
           </div>
         </section>
 
-        {/* PLANOS & PREÇOS */}
         <section id="planos" style={{ padding: '80px 20px', textAlign: 'center' }}>
           <h2 style={{ fontSize: '32px', marginBottom: '10px' }}>Escolha seu Plano VIP</h2>
           <p style={{ color: '#aaa', marginBottom: '50px' }}>Acesso total ao Radar, Inteligência Artificial e Backtest.</p>
-          
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', justifyContent: 'center', maxWidth: '800px', margin: '0 auto' }}>
-            
             <div style={{ background: '#111', border: '1px solid #333', padding: '40px', borderRadius: '15px', flex: '1 1 300px' }}>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>MENSAL</h3>
-              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 30<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 49<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
               <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
                 <li>✅ Acesso ao Radar 24/7</li>
                 <li>✅ Ligas: Copa, Euro, Sul e Premier</li>
                 <li>✅ Alertas de Máximas (Red)</li>
                 <li>❌ Inteligência Artificial Ouro</li>
               </ul>
-              {/* TROQUE O LINK DO WHATSAPP AQUI */}
-              <a href="https://wa.me/5585981618587?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
                 ASSINAR MENSAL
               </a>
             </div>
-
             <div style={{ background: '#1a1a1a', border: '2px solid #00f2fe', padding: '40px', borderRadius: '15px', flex: '1 1 300px', transform: 'scale(1.05)', boxShadow: '0 0 30px rgba(0, 242, 254, 0.15)' }}>
               <div style={{ background: '#00f2fe', color: '#000', fontSize: '12px', fontWeight: 'bold', padding: '5px 10px', borderRadius: '20px', display: 'inline-block', marginBottom: '15px' }}>MAIS VENDIDO</div>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>VIP PRO</h3>
-              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 50<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 97<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
               <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
                 <li>✅ Acesso ao Radar 24/7</li>
                 <li>✅ Laboratório de Backtest Liberado</li>
                 <li>✅ Dicas da Inteligência Artificial</li>
                 <li>✅ Suporte Prioritário</li>
               </ul>
-              {/* TROQUE O LINK DO WHATSAPP AQUI */}
-              <a href="https://wa.me/5585981618587?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
                 ASSINAR VIP PRO
               </a>
             </div>
-
           </div>
         </section>
 
-        {/* FOOTER */}
         <footer style={{ textAlign: 'center', padding: '40px', background: '#050505', borderTop: '1px solid #111', color: '#666', fontSize: '12px' }}>
           <p>© {new Date().getFullYear()} TH JURUNAS SYSTEM. Todos os direitos reservados.</p>
           <button onClick={() => setTelaAtiva('login')} style={{ background: 'transparent', border: 'none', color: '#9FC131', cursor: 'pointer', textDecoration: 'underline' }}>Já tem uma conta? Faça Login.</button>
@@ -563,11 +585,9 @@ function App() {
     return (
       <div className="login-container">
         <div className="login-box">
-          {/* Botão de Voltar para Vendas */}
           <button onClick={() => setTelaAtiva('landing')} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', marginBottom: '20px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
             ← Voltar para o Início
           </button>
-
           <h2 className="main-logo" style={{textAlign: 'center', marginBottom: '30px'}}>TH JURUNAS <span>SYSTEM</span></h2>
           <form onSubmit={efetuarLogin}>
             <label>USUÁRIO</label>
@@ -739,6 +759,7 @@ function App() {
             {canViewClientes && <button onClick={() => setAbaAtual(abaAtual === 'CLIENTES' ? null : 'CLIENTES')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'CLIENTES' ? '#ff4444' : '#111', color: abaAtual === 'CLIENTES' ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>👥 CLIENTES</button>}
           </div>
 
+          {/* BACKTEST */}
           {abaAtual === 'BACKTEST' && canViewBacktest && (
             <div className="cadastro-card" style={{border: '1px solid #ffcc00', background: 'rgba(255, 204, 0, 0.05)', marginTop: '15px', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ffcc00'}}>🧪 LABORATÓRIO DE BACKTEST (3 TIROS AO VIVO)</h3>
@@ -763,6 +784,7 @@ function App() {
             </div>
           )}
 
+          {/* GATILHOS */}
           {abaAtual === 'GATILHOS' && canViewGatilhos && (
             <div style={{animation: 'fadeIn 0.3s ease'}}>
               <div className="cadastro-card" style={{marginTop: '15px'}}>
@@ -792,6 +814,7 @@ function App() {
             </div>
           )}
 
+          {/* I.A */}
           {abaAtual === 'IA' && canViewIA && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#00f2fe'}}>🤖 RADAR I.A. (PADRÕES OURO)</h3>
@@ -815,6 +838,7 @@ function App() {
             </div>
           )}
 
+          {/* CLIENTES - COM CRUD COMPLETO */}
           {abaAtual === 'CLIENTES' && canViewClientes && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ff4444'}}>👥 CADASTRAR NOVO CLIENTE</h3>
@@ -827,9 +851,44 @@ function App() {
               <h3 className="section-title" style={{marginBottom: '10px', color: '#9FC131', marginTop: '20px', borderTop: '1px solid #333', paddingTop: '20px'}}>⚙️ GERENCIAR ACESSOS VIP</h3>
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
                 {listaClientes.map(cliente => (
-                  <div key={cliente.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1a1a1a', padding: '10px', borderRadius: '8px', borderLeft: '3px solid #333'}}>
-                    <span style={{color: '#fff', fontSize: '13px', fontWeight: 'bold'}}>{cliente.email}</span>
-                    <div style={{display: 'flex', gap: '8px'}}>
+                  <div key={cliente.id} style={{display: 'flex', flexDirection: 'column', gap: '8px', background: '#1a1a1a', padding: '15px', borderRadius: '8px', borderLeft: '3px solid #333'}}>
+                    
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                      
+                      {/* ÁREA DE EXIBIÇÃO OU EDIÇÃO */}
+                      {editandoId === cliente.id ? (
+                        <div style={{display: 'flex', flexDirection: 'column', gap: '5px', width: '60%'}}>
+                          <input className="flet-input" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Novo e-mail" style={{padding: '5px', fontSize: '12px'}} />
+                          <input className="flet-input" value={editSenha} onChange={e => setEditSenha(e.target.value)} placeholder="Nova senha" style={{padding: '5px', fontSize: '12px'}} />
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{color: '#fff', fontSize: '14px', fontWeight: 'bold'}}>{cliente.email}</span>
+                          <span style={{color: '#ffcc00', fontSize: '11px', marginTop: '3px'}}>🔑 Senha: {cliente.senha}</span>
+                          <span style={{color: '#888', fontSize: '10px', marginTop: '3px'}}>
+                            🕒 Último login: {cliente.ultimo_login ? new Date(cliente.ultimo_login).toLocaleString('pt-BR') : 'Nunca acessou'}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* BOTÕES DE CRUD (EDITAR / SALVAR / EXCLUIR) */}
+                      <div style={{display: 'flex', gap: '5px'}}>
+                        {editandoId === cliente.id ? (
+                          <>
+                            <button onClick={() => salvarEdicao(cliente.id)} style={{background: '#9FC131', color: '#000', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'}}>SALVAR</button>
+                            <button onClick={() => setEditandoId(null)} style={{background: '#333', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'}}>X</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => iniciarEdicao(cliente)} style={{background: '#333', color: '#fff', border: '1px solid #555', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', transition: '0.3s'}}>✏️ EDITAR</button>
+                            <button onClick={() => deletarCliente(cliente.id, cliente.email)} style={{background: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid #ff4444', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', transition: '0.3s'}}>🗑️ EXCLUIR</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* BOTÕES DE PERMISSÃO */}
+                    <div style={{display: 'flex', gap: '8px', marginTop: '5px'}}>
                       <button onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)} style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}>
                         {cliente.acesso_backtest ? '🧪 B-TEST: ON' : '🧪 B-TEST: OFF'}
                       </button>
@@ -846,6 +905,7 @@ function App() {
         </div>
       )}
 
+      {/* PAINEL MOBILE / RANKING / MÁXIMAS */}
       <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
           <button onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }} style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}>
@@ -920,7 +980,7 @@ function App() {
         </div>
       )}
 
-      {/* OS SELETORES: MERCADO E VISUALIZAÇÃO DE ODDS */}
+      {/* OS SELETORES */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="league-tabs" style={{ marginBottom: 0 }}>
           {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
@@ -954,6 +1014,7 @@ function App() {
         </div>
       </div>
 
+      {/* MATRIZ DE JOGOS */}
       <div className="matriz-container">
         <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>
