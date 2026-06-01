@@ -197,7 +197,7 @@ function App() {
     // Deixa o leão de chácara verificando a cada 10s
     const intervalId = setInterval(() => { 
       validarSessaoEBuscarDados(); 
-    }, 10000); 
+    }, 40000); 
 
     return () => clearInterval(intervalId);
   }, [usuarioLogado]); // Removi o sessionToken daqui para não bugar o timer
