@@ -3,10 +3,8 @@ import { supabase } from './supabase';
 import './App.css';
 
 function App() {
-  // 🔥 CONTROLE DE TELAS: 'landing' (Vendas), 'login' (Acesso), 'dashboard' (Logado)
   const [telaAtiva, setTelaAtiva] = useState('landing');
 
-  // SEGURANÇA E SESSÃO
   const [usuarioLogado, setUsuarioLogado] = useState(() => {
     const salvo = localStorage.getItem('usuarioLogado');
     return salvo ? JSON.parse(salvo) : null;
@@ -17,7 +15,6 @@ function App() {
   const [loginSenha, setLoginSenha] = useState('');
   const [erroLogin, setErroLogin] = useState('');
   
-  // ESTADOS DO CRUD DE CLIENTES
   const [novoUserEmail, setNovoUserEmail] = useState('');
   const [novoUserSenha, setNovoUserSenha] = useState('');
   const [editandoId, setEditandoId] = useState(null);
@@ -30,6 +27,7 @@ function App() {
   const [matrizJogos, setMatrizJogos] = useState([]);
   const [sinaisAtivos, setSinaisAtivos] = useState([]);
   const [dicasIA, setDicasIA] = useState([]);
+  const [mineradorAtivo, setMineradorAtivo] = useState(false); // CONTROLE DA IA
   
   const [alertasMaximas, setAlertasMaximas] = useState([]);
   const [alertasNotificados, setAlertasNotificados] = useState([]); 
@@ -67,7 +65,6 @@ function App() {
     { id: 'GOLEADA', label: '+5 Gols de um Time' },
   ];
 
-  // 🔥 LOGIN BLINDADO COM REGISTRO DE ÚLTIMO ACESSO
   const efetuarLogin = async (e) => {
     e.preventDefault();
     setErroLogin('');
@@ -85,9 +82,8 @@ function App() {
     }
 
     const newToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    const dataAtual = new Date().toISOString(); // Guarda a hora exata do login
+    const dataAtual = new Date().toISOString(); 
 
-    // Atualiza o ticket de sessão E o último login no banco
     await supabase.from('usuarios').update({ 
       session_token: newToken,
       ultimo_login: dataAtual
@@ -111,7 +107,6 @@ function App() {
     setTelaAtiva('landing'); 
   };
 
-  // 🔥 FUNÇÕES DE CRUD (CREATE, UPDATE, DELETE)
   const cadastrarCliente = async () => {
     if (!novoUserEmail || !novoUserSenha) return alert("Preencha email e senha!");
     const { error } = await supabase.from('usuarios').insert([{ email: novoUserEmail, senha: novoUserSenha, role: 'user', acesso_backtest: false, acesso_ia: false }]);
@@ -151,21 +146,20 @@ function App() {
   };
 
   const sortHoursDescending = (horasArray) => {
+    const horaAtual = new Date().getHours();
+    const margemFuturo = (horaAtual + 4) % 24;
+
     return horasArray.sort((a, b) => {
-      let diff = b - a;
-      if (diff > 12) return -1;  
-      if (diff < -12) return 1;  
-      return diff;               
+      const ajusteA = a <= margemFuturo ? a + 24 : a;
+      const ajusteB = b <= margemFuturo ? b + 24 : b;
+      return ajusteB - ajusteA; 
     });
   };
 
-  // 🔥 CORREÇÃO DO FALSO POSITIVO APLICADA AQUI
-  // 🔥 SEGURANÇA IMUNE A BUGS DE MEMÓRIA
   useEffect(() => {
     if (!usuarioLogado) return;
 
     const validarSessaoEBuscarDados = async () => {
-      // 1. FURA O BUG DO REACT: Pega o ticket em tempo real direto da memória do navegador
       const tokenAtualDoNavegador = localStorage.getItem('sessionToken');
 
       if (usuarioLogado.role === 'admin') {
@@ -179,9 +173,8 @@ function App() {
         .eq('id', usuarioLogado.id)
         .single();
 
-      if (error) return; // Se a internet piscar, não expulsa o usuário à toa
+      if (error) return; 
 
-      // 2. Compara o Banco com o HD do navegador (e não com a memória atrasada do React)
       if (userDB && userDB.session_token !== tokenAtualDoNavegador) {
         alert("⚠️ ATENÇÃO: Sua conta foi conectada em outro dispositivo. Você foi desconectado.");
         fazerLogout();
@@ -191,16 +184,13 @@ function App() {
       buscarDados();
     };
 
-    // Carrega o radar na hora que a tela abre
     buscarDados(); 
-
-    // Deixa o leão de chácara verificando a cada 10s
-    const intervalId = setInterval(() => { 
-      validarSessaoEBuscarDados(); 
-    }, 40000); 
-
+    
+    // 🔥 ECONOMIA DE DADOS: O radar de placares atualiza a cada 40 segundos
+    const intervalId = setInterval(() => { validarSessaoEBuscarDados(); }, 50000); 
+    
     return () => clearInterval(intervalId);
-  }, [usuarioLogado]); // Removi o sessionToken daqui para não bugar o timer
+  }, [usuarioLogado]);
 
   useEffect(() => {
     if (matrizJogos.length > 0) calcularEstatisticasGlobais(matrizJogos);
@@ -233,12 +223,21 @@ function App() {
     if (usuarioLogado?.role === 'admin') {
       const { data: users } = await supabase.from('usuarios').select('*').eq('role', 'user').order('created_at', { ascending: false });
       if (users) setListaClientes(users);
+      
+      const { data: controle } = await supabase.from('controle_minerador').select('*').eq('id', 1).single();
+      if (controle) setMineradorAtivo(controle.ativo);
     }
 
     const { data: matriz, error: erroMat } = await supabase.from('matriz_resultados').select('*').limit(500);
     if (erroMat) setErroDB("Erro matriz: " + erroMat.message);
     else if (matriz) { setMatrizJogos([...matriz]); setUltimaAtualizacao(new Date().toLocaleTimeString()); }
   }
+
+  const ligarMinerador = async () => {
+    setMineradorAtivo(true);
+    await supabase.from('controle_minerador').update({ ativo: true }).eq('id', 1);
+    alert("🚀 I.A. Mineradora LIGADA! Ela vai vasculhar o histórico agora e se desligará sozinha assim que terminar.");
+  };
 
   const normalizar = (texto) => String(texto).trim().toLowerCase();
 
@@ -425,7 +424,7 @@ function App() {
       
       if (error) throw error;
       if (!historico || historico.length === 0) {
-        setResultadoBacktest({ erro: "Histórico vazio. O alimentador IA precisa rodar mais vezes." });
+        setResultadoBacktest({ erro: "Histórico vazio. A I.A precisa rodar mais vezes." });
         setCarregandoBacktest(false);
         return;
       }
@@ -509,9 +508,6 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' }); 
   };
 
-  // ==========================================
-  // 🔥 RENDERIZAÇÃO DA PÁGINA DE VENDAS (LANDING)
-  // ==========================================
   if (!usuarioLogado && telaAtiva === 'landing') {
     return (
       <div style={{ backgroundColor: '#0a0a0a', color: '#fff', minHeight: '100vh', fontFamily: 'sans-serif' }}>
@@ -556,28 +552,28 @@ function App() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', justifyContent: 'center', maxWidth: '800px', margin: '0 auto' }}>
             <div style={{ background: '#111', border: '1px solid #333', padding: '40px', borderRadius: '15px', flex: '1 1 300px' }}>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>MENSAL</h3>
-              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 35<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#9FC131', marginBottom: '20px' }}>R$ 49<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
               <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
                 <li>✅ Acesso ao Radar 24/7</li>
                 <li>✅ Ligas: Copa, Euro, Sul e Premier</li>
                 <li>✅ Alertas de Máximas (Red)</li>
                 <li>❌ Inteligência Artificial Ouro</li>
               </ul>
-              <a href="https://wa.me/5585981618587?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano Mensal do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: 'transparent', color: '#9FC131', border: '2px solid #9FC131', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
                 ASSINAR MENSAL
               </a>
             </div>
             <div style={{ background: '#1a1a1a', border: '2px solid #00f2fe', padding: '40px', borderRadius: '15px', flex: '1 1 300px', transform: 'scale(1.05)', boxShadow: '0 0 30px rgba(0, 242, 254, 0.15)' }}>
               <div style={{ background: '#00f2fe', color: '#000', fontSize: '12px', fontWeight: 'bold', padding: '5px 10px', borderRadius: '20px', display: 'inline-block', marginBottom: '15px' }}>MAIS VENDIDO</div>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>VIP PRO</h3>
-              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 50<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 97<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
               <ul style={{ listStyle: 'none', padding: 0, textAlign: 'left', color: '#ccc', marginBottom: '30px', lineHeight: '2' }}>
                 <li>✅ Acesso ao Radar 24/7</li>
                 <li>✅ Laboratório de Backtest Liberado</li>
                 <li>✅ Dicas da Inteligência Artificial</li>
                 <li>✅ Suporte Prioritário</li>
               </ul>
-              <a href="https://wa.me/5585981618587?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
+              <a href="https://wa.me/5585999999999?text=Olá, quero assinar o Plano VIP PRO do Radar!" target="_blank" rel="noreferrer" style={{ display: 'block', textDecoration: 'none', background: '#00f2fe', color: '#000', padding: '12px', fontWeight: 'bold', borderRadius: '8px' }}>
                 ASSINAR VIP PRO
               </a>
             </div>
@@ -592,9 +588,6 @@ function App() {
     );
   }
 
-  // ==========================================
-  // 🔥 TELA DE LOGIN 
-  // ==========================================
   if (!usuarioLogado && telaAtiva === 'login') {
     return (
       <div className="login-container">
@@ -615,10 +608,6 @@ function App() {
       </div>
     );
   }
-
-  // ==========================================
-  // 🔥 O SISTEMA (DASHBOARD) SÓ RODA DAQUI PRA BAIXO SE ESTIVER LOGADO
-  // ==========================================
 
   const isAdmin = usuarioLogado.role === 'admin';
   const canViewBacktest = isAdmin || usuarioLogado.acesso_backtest;
@@ -773,7 +762,6 @@ function App() {
             {canViewClientes && <button onClick={() => setAbaAtual(abaAtual === 'CLIENTES' ? null : 'CLIENTES')} style={{flex: '1', minWidth: '120px', padding: '10px', borderRadius: '8px', background: abaAtual === 'CLIENTES' ? '#ff4444' : '#111', color: abaAtual === 'CLIENTES' ? '#fff' : '#ff4444', border: '1px solid #ff4444', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.3s'}}>👥 CLIENTES</button>}
           </div>
 
-          {/* BACKTEST */}
           {abaAtual === 'BACKTEST' && canViewBacktest && (
             <div className="cadastro-card" style={{border: '1px solid #ffcc00', background: 'rgba(255, 204, 0, 0.05)', marginTop: '15px', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ffcc00'}}>🧪 LABORATÓRIO DE BACKTEST (3 TIROS AO VIVO)</h3>
@@ -798,7 +786,6 @@ function App() {
             </div>
           )}
 
-          {/* GATILHOS */}
           {abaAtual === 'GATILHOS' && canViewGatilhos && (
             <div style={{animation: 'fadeIn 0.3s ease'}}>
               <div className="cadastro-card" style={{marginTop: '15px'}}>
@@ -828,10 +815,23 @@ function App() {
             </div>
           )}
 
-          {/* I.A */}
           {abaAtual === 'IA' && canViewIA && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid #00f2fe', background: 'rgba(0, 242, 254, 0.05)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#00f2fe'}}>🤖 RADAR I.A. (PADRÕES OURO)</h3>
+              
+              {isAdmin && (
+                <div style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px', textAlign: 'center' }}>
+                  <h4 style={{ color: '#fff', margin: '0 0 10px 0' }}>⚙️ CONTROLE MANUAL DO ROBÔ I.A.</h4>
+                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '15px' }}>Acione a varredura pesada apenas quando desejar novas dicas. A I.A. se desativará sozinha ao terminar para poupar limite de dados.</p>
+                  <button 
+                    onClick={ligarMinerador} 
+                    disabled={mineradorAtivo}
+                    style={{ background: mineradorAtivo ? '#333' : '#00f2fe', color: mineradorAtivo ? '#888' : '#000', padding: '12px 20px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: mineradorAtivo ? 'not-allowed' : 'pointer', width: '100%' }}>
+                    {mineradorAtivo ? "⏳ I.A. TRABALHANDO NOS BASTIDORES..." : "🟢 LIGAR VARREDURA DA I.A AGORA"}
+                  </button>
+                </div>
+              )}
+
               <div style={{fontSize: '12px', color: '#ccc', marginBottom: '15px'}}>A Inteligência Artificial analisa o histórico absoluto de jogos e sugere padrões com alta assertividade:</div>
               {dicasIA.length === 0 ? (
                 <div style={{color: '#888', fontSize: '13px', textAlign: 'center'}}>Nenhum padrão forte encontrado hoje ainda.</div>
@@ -852,7 +852,6 @@ function App() {
             </div>
           )}
 
-          {/* CLIENTES - COM CRUD COMPLETO */}
           {abaAtual === 'CLIENTES' && canViewClientes && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ff4444'}}>👥 CADASTRAR NOVO CLIENTE</h3>
@@ -868,8 +867,6 @@ function App() {
                   <div key={cliente.id} style={{display: 'flex', flexDirection: 'column', gap: '8px', background: '#1a1a1a', padding: '15px', borderRadius: '8px', borderLeft: '3px solid #333'}}>
                     
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-                      
-                      {/* ÁREA DE EXIBIÇÃO OU EDIÇÃO */}
                       {editandoId === cliente.id ? (
                         <div style={{display: 'flex', flexDirection: 'column', gap: '5px', width: '60%'}}>
                           <input className="flet-input" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Novo e-mail" style={{padding: '5px', fontSize: '12px'}} />
@@ -885,7 +882,6 @@ function App() {
                         </div>
                       )}
 
-                      {/* BOTÕES DE CRUD (EDITAR / SALVAR / EXCLUIR) */}
                       <div style={{display: 'flex', gap: '5px'}}>
                         {editandoId === cliente.id ? (
                           <>
@@ -901,7 +897,6 @@ function App() {
                       </div>
                     </div>
 
-                    {/* BOTÕES DE PERMISSÃO */}
                     <div style={{display: 'flex', gap: '8px', marginTop: '5px'}}>
                       <button onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)} style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}>
                         {cliente.acesso_backtest ? '🧪 B-TEST: ON' : '🧪 B-TEST: OFF'}
@@ -919,7 +914,6 @@ function App() {
         </div>
       )}
 
-      {/* PAINEL MOBILE / RANKING / MÁXIMAS */}
       <div style={{ padding: '0 15px', maxWidth: '800px', margin: '0 auto 20px auto' }}>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
           <button onClick={() => { setMostrarRankingMobile(!mostrarRankingMobile); setMostrarMaximasMobile(false); }} style={{ flex: '1', minWidth: '140px', padding: '12px', borderRadius: '8px', background: mostrarRankingMobile ? '#9FC131' : '#111', color: mostrarRankingMobile ? '#000' : '#9FC131', border: '1px solid #9FC131', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', transition: '0.3s' }}>
@@ -994,7 +988,6 @@ function App() {
         </div>
       )}
 
-      {/* OS SELETORES */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="league-tabs" style={{ marginBottom: 0 }}>
           {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
@@ -1028,7 +1021,6 @@ function App() {
         </div>
       </div>
 
-      {/* MATRIZ DE JOGOS */}
       <div className="matriz-container">
         <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>
