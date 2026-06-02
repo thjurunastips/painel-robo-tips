@@ -32,6 +32,8 @@ function App() {
   const [alertasMaximas, setAlertasMaximas] = useState([]);
   const [alertasNotificados, setAlertasNotificados] = useState([]); 
   
+  const [buscaCliente, setBuscaCliente] = useState('');
+  const [mostrarListaClientes, setMostrarListaClientes] = useState(false); // NOVO: Nasce fechado (false)
   const [listaClientes, setListaClientes] = useState([]);
   
   const [nome, setNome] = useState('');
@@ -852,6 +854,7 @@ function App() {
             </div>
           )}
 
+          {/* CLIENTES - DESIGN COMPACTO, COM BUSCA E EXPANSÍVEL */}
           {abaAtual === 'CLIENTES' && canViewClientes && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ff4444'}}>👥 CADASTRAR NOVO CLIENTE</h3>
@@ -861,54 +864,88 @@ function App() {
                 <button className="btn-flet-save" style={{padding: '0 15px', width: 'auto'}} onClick={cadastrarCliente}>SALVAR</button>
               </div>
 
-              <h3 className="section-title" style={{marginBottom: '10px', color: '#9FC131', marginTop: '20px', borderTop: '1px solid #333', paddingTop: '20px'}}>⚙️ GERENCIAR ACESSOS VIP</h3>
-              <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-                {listaClientes.map(cliente => (
-                  <div key={cliente.id} style={{display: 'flex', flexDirection: 'column', gap: '8px', background: '#1a1a1a', padding: '15px', borderRadius: '8px', borderLeft: '3px solid #333'}}>
-                    
-                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-                      {editandoId === cliente.id ? (
-                        <div style={{display: 'flex', flexDirection: 'column', gap: '5px', width: '60%'}}>
-                          <input className="flet-input" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Novo e-mail" style={{padding: '5px', fontSize: '12px'}} />
-                          <input className="flet-input" value={editSenha} onChange={e => setEditSenha(e.target.value)} placeholder="Nova senha" style={{padding: '5px', fontSize: '12px'}} />
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{color: '#fff', fontSize: '14px', fontWeight: 'bold'}}>{cliente.email}</span>
-                          <span style={{color: '#ffcc00', fontSize: '11px', marginTop: '3px'}}>🔑 Senha: {cliente.senha}</span>
-                          <span style={{color: '#888', fontSize: '10px', marginTop: '3px'}}>
-                            🕒 Último login: {cliente.ultimo_login ? new Date(cliente.ultimo_login).toLocaleString('pt-BR') : 'Nunca acessou'}
-                          </span>
-                        </div>
-                      )}
-
-                      <div style={{display: 'flex', gap: '5px'}}>
-                        {editandoId === cliente.id ? (
-                          <>
-                            <button onClick={() => salvarEdicao(cliente.id)} style={{background: '#9FC131', color: '#000', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'}}>SALVAR</button>
-                            <button onClick={() => setEditandoId(null)} style={{background: '#333', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'}}>X</button>
-                          </>
-                        ) : (
-                          <>
-                            <button onClick={() => iniciarEdicao(cliente)} style={{background: '#333', color: '#fff', border: '1px solid #555', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', transition: '0.3s'}}>✏️ EDITAR</button>
-                            <button onClick={() => deletarCliente(cliente.id, cliente.email)} style={{background: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid #ff4444', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', transition: '0.3s'}}>🗑️ EXCLUIR</button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{display: 'flex', gap: '8px', marginTop: '5px'}}>
-                      <button onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)} style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}>
-                        {cliente.acesso_backtest ? '🧪 B-TEST: ON' : '🧪 B-TEST: OFF'}
-                      </button>
-                      <button onClick={() => togglePermissao(cliente.id, 'acesso_ia', cliente.acesso_ia)} style={{padding: '5px 10px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_ia ? '#00f2fe' : '#333', color: cliente.acesso_ia ? '#000' : '#888'}}>
-                        {cliente.acesso_ia ? '🤖 I.A: ON' : '🤖 I.A: OFF'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {listaClientes.length === 0 && <div style={{color: '#888', fontSize: '12px', textAlign: 'center'}}>Nenhum cliente cadastrado.</div>}
+              {/* CABEÇALHO CLICÁVEL (ABRE/FECHA A LISTA) */}
+              <div 
+                onClick={() => setMostrarListaClientes(!mostrarListaClientes)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', borderTop: '1px solid #333', paddingTop: '20px', marginBottom: '15px', cursor: 'pointer', userSelect: 'none' }}
+              >
+                <h3 className="section-title" style={{ margin: 0, color: '#9FC131', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  ⚙️ GERENCIAR ACESSOS VIP 
+                  <span style={{ color: '#fff', background: '#333', padding: '2px 8px', borderRadius: '12px', fontSize: '11px' }}>Total: {listaClientes.length}</span>
+                </h3>
+                <span style={{ color: '#9FC131', fontSize: '14px', fontWeight: 'bold' }}>
+                  {mostrarListaClientes ? '▲ ESCONDER' : '▼ EXPANDIR'}
+                </span>
               </div>
+
+              {/* A LISTA E A BUSCA SÓ APARECEM SE 'mostrarListaClientes' FOR TRUE */}
+              {mostrarListaClientes && (
+                <div style={{ animation: 'fadeIn 0.3s ease' }}>
+                  
+                  <input 
+                    className="flet-input" 
+                    style={{ marginBottom: '15px', width: '100%', border: '1px solid #555' }}
+                    placeholder="🔍 Buscar cliente por e-mail..." 
+                    value={buscaCliente} 
+                    onChange={(e) => setBuscaCliente(e.target.value)} 
+                  />
+
+                  <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
+                    {listaClientes
+                      .filter(cliente => cliente.email.toLowerCase().includes(buscaCliente.toLowerCase()))
+                      .map(cliente => (
+                      <div key={cliente.id} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', background: '#1a1a1a', padding: '10px 15px', borderRadius: '6px', borderLeft: '3px solid #333', gap: '15px' }}>
+                        
+                        {editandoId === cliente.id ? (
+                          <div style={{display: 'flex', gap: '10px', flex: '1', minWidth: '200px'}}>
+                            <input className="flet-input" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Novo e-mail" style={{padding: '5px 10px', fontSize: '12px', flex: 1}} />
+                            <input className="flet-input" value={editSenha} onChange={e => setEditSenha(e.target.value)} placeholder="Nova senha" style={{padding: '5px 10px', fontSize: '12px', flex: 1}} />
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', flex: '1', minWidth: '200px' }}>
+                            <span style={{color: '#fff', fontSize: '14px', fontWeight: 'bold'}}>{cliente.email}</span>
+                            <div style={{ display: 'flex', gap: '15px', marginTop: '4px', flexWrap: 'wrap' }}>
+                              <span style={{color: '#ffcc00', fontSize: '11px'}}>🔑 {cliente.senha}</span>
+                              <span style={{color: '#888', fontSize: '10px'}}>🕒 {cliente.ultimo_login ? new Date(cliente.ultimo_login).toLocaleString('pt-BR') : 'Nunca acessou'}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap'}}>
+                          
+                          <div style={{display: 'flex', gap: '5px'}}>
+                            <button onClick={() => togglePermissao(cliente.id, 'acesso_backtest', cliente.acesso_backtest)} style={{padding: '4px 8px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_backtest ? '#ffcc00' : '#333', color: cliente.acesso_backtest ? '#000' : '#888'}}>
+                              {cliente.acesso_backtest ? '🧪 B-TEST: ON' : '🧪 B-TEST: OFF'}
+                            </button>
+                            <button onClick={() => togglePermissao(cliente.id, 'acesso_ia', cliente.acesso_ia)} style={{padding: '4px 8px', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', border: 'none', background: cliente.acesso_ia ? '#00f2fe' : '#333', color: cliente.acesso_ia ? '#000' : '#888'}}>
+                              {cliente.acesso_ia ? '🤖 I.A: ON' : '🤖 I.A: OFF'}
+                            </button>
+                          </div>
+
+                          <div style={{display: 'flex', gap: '5px'}}>
+                            {editandoId === cliente.id ? (
+                              <>
+                                <button onClick={() => salvarEdicao(cliente.id)} style={{background: '#9FC131', color: '#000', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'}}>SALVAR</button>
+                                <button onClick={() => setEditandoId(null)} style={{background: '#333', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'}}>X</button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => iniciarEdicao(cliente)} style={{background: '#333', color: '#fff', border: '1px solid #555', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', transition: '0.3s'}}>✏️ EDITAR</button>
+                                <button onClick={() => deletarCliente(cliente.id, cliente.email)} style={{background: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid #ff4444', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', transition: '0.3s'}}>🗑️ EXCLUIR</button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                      </div>
+                    ))}
+                    
+                    {listaClientes.filter(cliente => cliente.email.toLowerCase().includes(buscaCliente.toLowerCase())).length === 0 && (
+                      <div style={{color: '#888', fontSize: '12px', textAlign: 'center', padding: '20px'}}>Nenhum cliente encontrado.</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
