@@ -27,21 +27,25 @@ function App() {
   const [matrizJogos, setMatrizJogos] = useState([]);
   const [sinaisAtivos, setSinaisAtivos] = useState([]);
   const [dicasIA, setDicasIA] = useState([]);
-  const [mineradorAtivo, setMineradorAtivo] = useState(false); // CONTROLE DA IA
+  const [mineradorAtivo, setMineradorAtivo] = useState(false);
   
   const [alertasMaximas, setAlertasMaximas] = useState([]);
   const [alertasNotificados, setAlertasNotificados] = useState([]); 
   
-  const [buscaCliente, setBuscaCliente] = useState('');
-  const [mostrarListaClientes, setMostrarListaClientes] = useState(false); // NOVO: Nasce fechado (false)
   const [listaClientes, setListaClientes] = useState([]);
+  const [buscaCliente, setBuscaCliente] = useState('');
+  const [mostrarListaClientes, setMostrarListaClientes] = useState(false);
   
   const [nome, setNome] = useState('');
   const [sequencia, setSequencia] = useState([]);
   const [inputValor, setInputValor] = useState('');
 
   const [ligaSelecionada, setLigaSelecionada] = useState('Copa');
-  const [placarFiltro, setPlacarFiltro] = useState(null); 
+  
+  // 🔥 MULTI-SELEÇÃO DE PLACARES COM CORES
+  const [placaresFiltro, setPlacaresFiltro] = useState([]); 
+  const coresFiltro = ['#00f2fe', '#ff00ff', '#ffcc00', '#9FC131', '#ff4444', '#9933ff'];
+  
   const [mercadoAtivo, setMercadoAtivo] = useState('AMBAS');
   
   const [mostrarOdds, setMostrarOdds] = useState(true);
@@ -64,6 +68,7 @@ function App() {
     { id: 'OVER_15', label: '+1.5 Gols' },
     { id: 'OVER_25', label: '+2.5 Gols' },
     { id: 'OVER_45', label: '+5 Gols na Partida (FT)' },
+    { id: 'OVER_35_TIME', label: '+3.5 Gols de um Time' },
     { id: 'GOLEADA', label: '+5 Gols de um Time' },
   ];
 
@@ -147,6 +152,17 @@ function App() {
     else buscarDados(); 
   };
 
+  const togglePlacarFiltro = (placar) => {
+    if (!placar || placar === "-" || placar === "?") return;
+    setPlacaresFiltro(prev => {
+      if (prev.includes(placar)) {
+        return prev.filter(p => p !== placar);
+      } else {
+        return [...prev, placar];
+      }
+    });
+  };
+
   const sortHoursDescending = (horasArray) => {
     const horaAtual = new Date().getHours();
     const margemFuturo = (horaAtual + 4) % 24;
@@ -188,8 +204,7 @@ function App() {
 
     buscarDados(); 
     
-    // 🔥 ECONOMIA DE DADOS: O radar de placares atualiza a cada 40 segundos
-    const intervalId = setInterval(() => { validarSessaoEBuscarDados(); }, 50000); 
+    const intervalId = setInterval(() => { validarSessaoEBuscarDados(); }, 40000); 
     
     return () => clearInterval(intervalId);
   }, [usuarioLogado]);
@@ -292,6 +307,7 @@ function App() {
       case 'OVER_15': isGreen = (total >= 2); break;
       case 'OVER_25': isGreen = (total >= 3); break;
       case 'OVER_45': isGreen = (total >= 5); break;
+      case 'OVER_35_TIME': isGreen = (c >= 4 || f >= 4); break;
       case 'GOLEADA': isGreen = (c >= 5 || f >= 5); break;
       default: isGreen = (c > 0 && f > 0);
     }
@@ -565,7 +581,7 @@ function App() {
                 ASSINAR MENSAL
               </a>
             </div>
-            <div style={{ background: '#1a1a1a', border: '2px solid #00f2fe', padding: '40px', borderRadius: '15px', flex: '1 1 300px', transform: 'scale(1.05)', boxShadow: '0 0 30px rgba(0, 242, 254, 0.15)' }}>
+            <div style={{ background: '#1a1a1a', border: '2px solid #00f2fe', padding: '40px', borderRadius: '15px', flex: '1 1 300px', transform: 'scale(1.05)', boxShadow: '0 0 30px rgba(0, 242, 0, 0.15)' }}>
               <div style={{ background: '#00f2fe', color: '#000', fontSize: '12px', fontWeight: 'bold', padding: '5px 10px', borderRadius: '20px', display: 'inline-block', marginBottom: '15px' }}>MAIS VENDIDO</div>
               <h3 style={{ fontSize: '24px', margin: '0 0 10px 0', color: '#fff' }}>VIP PRO</h3>
               <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#00f2fe', marginBottom: '20px' }}>R$ 97<span style={{ fontSize: '16px', color: '#888' }}>/mês</span></div>
@@ -695,11 +711,24 @@ function App() {
       if (linha && linha.resultados && linha.resultados[String(min)]) {
         const res = linha.resultados[String(min)];
         const isMaxima = setMaximas.has(chave);
-        const isSelected = placarFiltro === res.placar;
+        
+        const indexFiltro = placaresFiltro.indexOf(res.placar);
+        const isSelected = indexFiltro !== -1;
+        
         const corDefinitiva = calcularCorDinamica(res.placar, mercadoAtivo);
 
         if (isMaxima) classesExtras += " blink-maxima";
-        if (isSelected) classesExtras += " selected-score";
+        
+        let borderStyle = {};
+        if (isSelected) {
+            const corBorda = coresFiltro[indexFiltro % coresFiltro.length];
+            borderStyle = { 
+                border: `2px solid ${corBorda}`, 
+                boxShadow: `0 0 10px ${corBorda}60`, 
+                zIndex: 2, 
+                position: 'relative' 
+            };
+        }
         
         const rawPlacar = String(res.placar || "").trim();
         const hasHyphen = rawPlacar.includes("-");
@@ -734,7 +763,7 @@ function App() {
         }
         
         return (
-          <div key={chave} className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => setPlacarFiltro(placarFiltro === res.placar ? null : res.placar)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', lineHeight: '1.2' }}>
+          <div key={chave} className={`grid-cell result-cell ${corDefinitiva} ${classesExtras}`} title={`${res.home || '?'} x ${res.away || '?'}`} onClick={() => togglePlacarFiltro(res.placar)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', lineHeight: '1.2', ...borderStyle }}>
             {content}
           </div>
         );
@@ -854,7 +883,6 @@ function App() {
             </div>
           )}
 
-          {/* CLIENTES - DESIGN COMPACTO, COM BUSCA E EXPANSÍVEL */}
           {abaAtual === 'CLIENTES' && canViewClientes && (
             <div className="cadastro-card" style={{marginTop: '15px', border: '1px solid rgba(34, 34, 34, 1)', animation: 'fadeIn 0.3s ease'}}>
               <h3 className="section-title" style={{marginBottom: '10px', color: '#ff4444'}}>👥 CADASTRAR NOVO CLIENTE</h3>
@@ -864,7 +892,6 @@ function App() {
                 <button className="btn-flet-save" style={{padding: '0 15px', width: 'auto'}} onClick={cadastrarCliente}>SALVAR</button>
               </div>
 
-              {/* CABEÇALHO CLICÁVEL (ABRE/FECHA A LISTA) */}
               <div 
                 onClick={() => setMostrarListaClientes(!mostrarListaClientes)}
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', borderTop: '1px solid #333', paddingTop: '20px', marginBottom: '15px', cursor: 'pointer', userSelect: 'none' }}
@@ -878,7 +905,6 @@ function App() {
                 </span>
               </div>
 
-              {/* A LISTA E A BUSCA SÓ APARECEM SE 'mostrarListaClientes' FOR TRUE */}
               {mostrarListaClientes && (
                 <div style={{ animation: 'fadeIn 0.3s ease' }}>
                   
@@ -1027,7 +1053,7 @@ function App() {
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="league-tabs" style={{ marginBottom: 0 }}>
-          {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacarFiltro(null); }}>{liga}</button>)}
+          {ligasDisponiveis.map(liga => <button key={liga} className={`tab-btn ${ligaSelecionada === liga ? 'active' : ''}`} onClick={() => { setLigaSelecionada(liga); setPlacaresFiltro([]); }}>{liga}</button>)}
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -1059,14 +1085,32 @@ function App() {
       </div>
 
       <div className="matriz-container">
-        <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="matriz-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <h3>
             📡 RADAR - {ligaSelecionada.toUpperCase()}
             {sinaisDessaLiga.length > 0 && <span style={{marginLeft: '15px', color: '#00f2fe', fontSize: '12px', animation: 'piscarAlerta 1s infinite'}}>⚠️ SINAL DETECTADO! PREPARE-SE PARA ENTRAR</span>}
           </h3>
-          <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+          <div style={{display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap'}}>
             {ultimaAtualizacao && <span style={{fontSize: '11px', color: '#888'}}>Atualizado às {ultimaAtualizacao}</span>}
-            {placarFiltro && <span style={{ fontSize: '12px', color: '#ffcc00', fontWeight: 'bold', padding: '5px 10px', background: 'rgba(255, 204, 0, 0.1)', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setPlacarFiltro(null)}>🔍 Buscando placar: {placarFiltro} (Limpar)</span>}
+            
+            {placaresFiltro.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '11px', color: '#888' }}>🔍 Buscando:</span>
+                {placaresFiltro.map((p, idx) => (
+                  <span 
+                    key={p} 
+                    style={{ fontSize: '11px', color: '#000', fontWeight: 'bold', padding: '3px 8px', background: coresFiltro[idx % coresFiltro.length], borderRadius: '12px', cursor: 'pointer' }} 
+                    onClick={() => togglePlacarFiltro(p)}
+                    title="Clique para remover este placar"
+                  >
+                    {p} ✕
+                  </span>
+                ))}
+                <span style={{ fontSize: '11px', color: '#ff4444', cursor: 'pointer', marginLeft: '5px', textDecoration: 'underline' }} onClick={() => setPlacaresFiltro([])}>
+                  Limpar tudo
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
