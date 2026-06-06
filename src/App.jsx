@@ -351,7 +351,7 @@ function App() {
       });
 
       flatJogos.sort((a, b) => {
-        if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[a.hora] - hourAge[b.hora]; 
+        if (hourAge[a.hora] !== hourAge[b.hora]) return hourAge[b.hora] - hourAge[a.hora]; 
         return a.min - b.min; 
       });
 
